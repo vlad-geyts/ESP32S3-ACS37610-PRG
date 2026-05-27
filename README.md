@@ -1,3 +1,5 @@
+`By Gimini`
+
 This sounds like an excellent engineering project, Vlad. The Allegro ACS37610 is a highly precise coreless current sensor, and building a custom programming fixture using the ESP32-S3 is a great way to handle its specific Manchester-encoded single-wire interface.
 
 Since the PROG pin on the ACS37610 combines both transmit and receive over a single line (often requiring specific voltage levels or open-drain configurations with pull-ups depending on the exact implementation of Mode 2), getting Phase 1 solid is the perfect starting point.
@@ -280,3 +282,42 @@ With this skeleton code running on your dev board:
 - It dumps the pulse durations and logic levels straight to your Serial Monitor.
 
 To build out the specific algorithm inside decodeSymbols, what is the expected data bit rate (or bit-period duration in microseconds) specified in the ACS37610 datasheet for Mode 2 communication?
+
+
+
+
+`By Claude`
+Here's the updated `v2.0 plan`. Here's a summary of every change made from your B1–B6 feedback:
+- *B1 — CRC (§2.3a, new dedicated section)*
+    g(x) = x³+x+1, init = 0b111, SYNC excluded from calculation. CRC coverage spelled out per command type (write vs. read request vs. device response).
+- *B2 — ECC (§2.5.2 and firmware modules)*
+    6-bit Hamming code over DATA[25:0] → DATA[31:26]. Referenced consistently in the write table, EEPROM write section, firmware module list, and the EEPROM write state machine.
+- *B3 — Register map (§2.7, new full section)*
+    All 6 registers documented with addresses, R/W access, and full bit-field tables: EE_CUST0 (0x09), SH_CUST0 (0x19), EE_CUST1 (0x0A), SH_CUST1 (0x1A), EE_CUST2 (0x0B), FAULT_STATUS (0x20). Added a ⚠️ warning on WRITE_LOCK bit [25].
+- *B4 — Access code (§2.4 and all references)*
+    Corrected to 0x2C413736 (from 0x2C413737) with a note that VOUT remains enabled. Updated in the command table, EEPROM state machine, and Appendix A.
+- *B5 — Hardware & Firmware*
+    Controller updated to ESP32-S3-DEVKITC-1N16R8V throughout. Device noted as custom eval board. Connection is 50 mm 3-wire cable — no custom PCB for this phase. Firmware stack updated to VS Code + PlatformIO + Arduino framework everywhere (replaced ESP-IDF/FreeRTOS/TinyUSB references).
+- *B6 — Turnaround timing (§2.2 and Phase 3)*
+    No turnaround delay required — device responds immediately. 74 µs inter-command delay confirmed and added to the timing table and Phase 3 objectives.
+
+
+
+
+`Qustion by Me`
+*Hi Claude. I need to clarify the communication  port to be used for the host on which we'll run user GUI. The ESP32-S3-WROOM-1 has 2 USB ports.  UST-OTG and USB to UART. Can we use USB to UART for low level debugging as a terminal and use native USB-OTG for host communication. Please advise.*
+
+
+
+`Replay by Claude`
+Yes, your proposed split is exactly the right approach, and the DevKitC-1 hardware is purpose-built to support it. Here's the full picture:
+
+**The two USB ports on the DevKitC-1**
+The board has two distinct USB connections. The USB-to-UART port (Micro-USB) is used for power supply, flashing firmware, and communication via the on-board USB-to-UART bridge chip (Silicon Labs CP210x). The ESP32-S3 USB port (also Micro-USB) connects directly to the ESP32-S3's native USB OTG peripheral on GPIO19/20 — no bridge chip in between.
+
+Because the DevKitC also includes a Silicon Labs CP210x USB-to-UART bridge accessible via a separate Micro-USB port, you can power, program, and monitor the output of the ESP32-S3 while its USB peripheral is connected to another device simultaneously. This is precisely your use case.
+
+
+**Recommended port assignment**
+`USB-to-UART (CP210x)` Micro-USBLow-level debug terminal — Serial output, ESP-IDF monitor, PlatformIO serial monitor, flashing
+`ESP32-S3 USB (OTG/CDC)` Micro-USBHost GUI communication — the Python programmer GUI connects here

@@ -7,10 +7,10 @@
 // GPIO_PIN_COUNT = 49. Any pin >= 49 will trigger HAL errors.
 
 // C++17: constexpr std::array with aggregate initialization
-// Excludes: Used pins (2,4,5,6,10-14,21,47,48), Strapping (0,3,45,46), 
+// Excludes: Used pins (4, 5, 7, 21), Strapping (0,3,45,46), 
 // USB (19,20), Internal Flash (26-32), PSRAM (33-37), UART0 (43,44)
-constexpr std::array<int, 8> kUnusedGpios = {
-    1, 15, 16, 17, 18, 38, 39, 40
+constexpr std::array<int, 20> kUnusedGpios = {
+    1, 2, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 38, 39, 40, 41, 42, 47
 };
 
 // Compile-time safety check: ensures no pin exceeds hardware limit

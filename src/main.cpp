@@ -120,6 +120,7 @@ void setup() {
 
     // Configure Hardware using our Namespace
     gpioConfig();
+    ws2812.begin();
 
     // Standard Heartbeat (Priority: 0) on Core 0
     xTaskCreatePinnedToCore(heartbeatTask, "Heartbeat", 4096, NULL, 0, NULL, 0);

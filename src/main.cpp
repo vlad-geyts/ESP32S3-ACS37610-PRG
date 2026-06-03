@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
 #include "unused_gpio.h"
+#include "manchester.h"
+#include "crc3.h"
 
 // WS2812 Configuration
 #define WS2812_PIN      48
@@ -23,6 +25,7 @@ Adafruit_NeoPixel ws2812(NUM_LEDS, WS2812_PIN, LED_TYPE);
 
 // Function Prototypes
 void heartbeatTask(void *pvParameters);
+void programmerTask(void *pvParameters);
 void gpioConfig();
 
 void setup() {
@@ -36,6 +39,12 @@ void setup() {
     // Configure Hardware using our Namespace
     gpioConfig();
     ws2812.begin();
+
+    // Manchester TX — initialise RMT channel (30 kbps, T=33 µs)
+    manchester_tx_init(33);
+
+    // Programmer task on Core 1, priority 5 (timing-critical RMT work)
+    xTaskCreatePinnedToCore(programmerTask, "Programmer", 8192, NULL, 5, NULL, 1);
 
     // Standard Heartbeat (Priority: 0) on Core 0
     xTaskCreatePinnedToCore(heartbeatTask, "Heartbeat", 4096, NULL, 0, NULL, 0);
@@ -51,6 +60,29 @@ void gpioConfig() {
     pinMode(Config::LedPin, OUTPUT);
     pinMode(Config::StrobOut, OUTPUT);
     digitalWrite(Config::StrobOut, LOW);
+}
+
+// Programmer task — Core 1, priority 5.
+// Phase 3: transmit a known READ request frame every 2 s for scope verification.
+// READ FAULT_STATUS (0x20): R/W=1, ADDR=0x20, CRC computed by crc3_read_request().
+void programmerTask(void *pvParameters) {
+    const uint8_t addr = 0x20;                      // FAULT_STATUS register
+    const uint8_t crc  = crc3_read_request(addr);  // = 5  (verified by unit test)
+
+    // Read request frame: SYNC[2]=00 | R/W[1]=1 | ADDR[6] | CRC[3]  = 12 bits
+    // Pack MSB first: bit11..0 = 0,0,1, a5..a0, c2..c0
+    uint64_t frame = ((uint64_t)1   << 9) |   // R/W = 1
+                     ((uint64_t)addr << 3) |   // ADDR[6]
+                     ((uint64_t)crc);          // CRC[3]
+    // Prepend SYNC (2 zero bits) → shift everything up 2
+    frame <<= 2;                               // SYNC[1:0] = 0b00 (already zero)
+
+    Serial.printf("[PROG] READ FAULT_STATUS frame = 0x%03llX  CRC=%d\n", frame >> 2, crc);
+
+    for (;;) {
+        manchester_tx_send(frame, 12);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
 }
 
 void heartbeatTask(void *pvParameters) {

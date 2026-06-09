@@ -1,6 +1,7 @@
 #include "manchester.h"
 #include <driver/rmt.h>
 #include <driver/gpio.h>
+#include <soc/gpio_struct.h>
 
 // Hardware pin assignments
 static constexpr gpio_num_t    kProgGpio  = GPIO_NUM_4;   // PROG line (open-drain)
@@ -34,9 +35,23 @@ void manchester_tx_init(uint32_t bit_period_us) {
 
     // Open-drain on PROG: RMT HIGH → line released (pull-up provides HIGH),
     //                      RMT LOW  → GPIO actively pulls the line low.
-    // gpio_set_direction() sets the OD bit in GPIO_PINn_REG without disturbing
-    // the GPIO-matrix routing that rmt_config() already set up for this pin.
-    ESP_ERROR_CHECK(gpio_set_direction(kProgGpio, GPIO_MODE_OUTPUT_OD));
+    // Write pad_driver bit directly — equivalent to gpio_od_enable() but without
+    // the gpio_matrix_out(SIG_GPIO_OUT_IDX) side-effect that gpio_set_direction()
+    // triggers, which would disconnect the RMT TX signal from this pin.
+    GPIO.pin[kProgGpio].pad_driver = 1;
+
+    // Disable internal pulldown: with OD mode and RMT idle HIGH (released),
+    // an active internal PD fights the external 10K pull-up and drops idle
+    // voltage to ~2V. gpio_pulldown_dis writes only IO_MUX — no GPIO matrix effect.
+    gpio_pulldown_dis(kProgGpio);
+
+    // ESP32-S3 legacy RMT: idle_output_en does not engage reliably on this
+    // peripheral revision. Park the line HIGH by transmitting a 1-tick HIGH
+    // symbol. The RMT holds its last output level after TX, so PROG stays HIGH.
+    rmt_item32_t park = {};
+    park.duration0 = 1;  park.level0 = 1;  // 0.1 µs HIGH
+    park.duration1 = 0;  park.level1 = 0;  // end marker
+    rmt_write_items(kRmtChan, &park, 1, true);
 
     gpio_set_level(kStrobGpio, 0);
 }
@@ -46,7 +61,8 @@ void manchester_tx_send(uint64_t bits, uint8_t bit_count) {
     // G.E. Thomas convention, MSB first:
     //   bit 0 → LOW(T/2)  then HIGH(T/2)   rising edge at mid-point
     //   bit 1 → HIGH(T/2) then LOW(T/2)    falling edge at mid-point
-    rmt_item32_t syms[44] = {};
+    // +1 for the parking HIGH symbol appended after the Manchester frame.
+    rmt_item32_t syms[45] = {};
 
     for (uint8_t i = 0; i < bit_count; ++i) {
         uint8_t bit     = (bits >> (bit_count - 1u - i)) & 1u;
@@ -55,8 +71,12 @@ void manchester_tx_send(uint64_t bits, uint8_t bit_count) {
         syms[i].duration1 = s_half_ticks;
         syms[i].level1    = bit ? 0u : 1u;
     }
+    // Parking symbol: 1-tick HIGH followed by end marker. The RMT holds the last
+    // output level (HIGH) after TX, releasing the PROG line via the external pull-up.
+    syms[bit_count].duration0 = 1;  syms[bit_count].level0 = 1;
+    syms[bit_count].duration1 = 0;  syms[bit_count].level1 = 0;
 
-    gpio_set_level(kStrobGpio, 1);                              // scope trigger: frame start
-    rmt_write_items(kRmtChan, syms, bit_count, true);           // true = block until done
-    gpio_set_level(kStrobGpio, 0);                              // scope trigger: frame end
+    gpio_set_level(kStrobGpio, 1);                                  // scope trigger: frame start
+    rmt_write_items(kRmtChan, syms, bit_count + 1u, true);          // +1 includes parking symbol
+    gpio_set_level(kStrobGpio, 0);                                  // scope trigger: frame end
 }

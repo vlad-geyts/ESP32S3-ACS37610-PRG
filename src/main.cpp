@@ -69,15 +69,14 @@ void programmerTask(void *pvParameters) {
     const uint8_t addr = 0x20;                      // FAULT_STATUS register
     const uint8_t crc  = crc3_read_request(addr);  // = 5  (verified by unit test)
 
-    // Read request frame: SYNC[2]=00 | R/W[1]=1 | ADDR[6] | CRC[3]  = 12 bits
-    // Pack MSB first: bit11..0 = 0,0,1, a5..a0, c2..c0
+    // 12-bit frame, MSB-first: bits 11:10 = SYNC=00, bit 9 = R/W=1,
+    // bits 8:3 = ADDR[5:0], bits 2:0 = CRC[2:0].
+    // The implicit zeros above bit 9 already carry the SYNC value — no shift needed.
     uint64_t frame = ((uint64_t)1   << 9) |   // R/W = 1
                      ((uint64_t)addr << 3) |   // ADDR[6]
                      ((uint64_t)crc);          // CRC[3]
-    // Prepend SYNC (2 zero bits) → shift everything up 2
-    frame <<= 2;                               // SYNC[1:0] = 0b00 (already zero)
 
-    Serial.printf("[PROG] READ FAULT_STATUS frame = 0x%03llX  CRC=%d\n", frame >> 2, crc);
+    Serial.printf("[PROG] READ FAULT_STATUS frame = 0x%03llX  CRC=%d\n", frame, crc);
 
     for (;;) {
         manchester_tx_send(frame, 12);

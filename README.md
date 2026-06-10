@@ -166,5 +166,28 @@ ACS37610LLUATR-010B3 Manchester-encoded EEPROM programmer on ESP32-S3-DEVKITC-1N
 
 
 ---------------------------------------------------------------------------------------
-New chat
+`"Continue with the ACS37610 programmer project. CRC-3 is done. Ready to implement the RMT Manchester TX encoder — please check memory for context."`
+---------------------------------------------------------------------------------------
+
+Done. Here's a summary of what was updated:
+
+`Documents/ACS37610_Programmer_Development_Plan_v4.md` — new document created with these changes vs v3:
+
+Version header: v4.0, reflecting TX architecture change
+§1.1: RMT reference removed; bit-bang TX noted
+§3.3: Zener warning added — do not use a 3.6 V Zener for PROG ESD; excessive reverse current at 3.3 V causes 2.2 V idle voltage
+§4.1: Manchester driver split into TX (bit-bang) and RX (RMT, pending) rows
+§4.2: Replaced RMT TX approach with full bit-bang implementation details + scope results; added §4.2a with RMT RX plan
+§4.3: manchester.cpp description updated
+Phase 3: TX objectives marked complete; RX marked as next
+Schedule: Phase 3 → "TX ✅ / RX pending"
+R4: Downgraded, root cause updated to bit-bang (no RMT timing risk)
+v3.md restored to its original committed state (unchanged).
+
+Memory file updated: TX validation complete, Zener root cause documented, v4 plan noted.
+
+Ready to continue with Phase 3 RX in the next session.
+
+---------------------------------------------------------------------------------------
+`"Continue with the ACS37610 programmer project. TX encoder is done. Ready to implement the RMT Manchester RX decoder — please check memory for context."`
 ---------------------------------------------------------------------------------------

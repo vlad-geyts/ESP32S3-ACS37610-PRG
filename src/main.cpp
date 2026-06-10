@@ -80,7 +80,7 @@ void programmerTask(void *pvParameters) {
 
     for (;;) {
         manchester_tx_send(frame, 12);
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
 

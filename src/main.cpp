@@ -40,8 +40,9 @@ void setup() {
     gpioConfig();
     ws2812.begin();
 
-    // Manchester TX — initialise RMT channel (30 kbps, T=33 µs)
+    // Manchester TX (bit-bang) and RX (RMT_CHANNEL_1) — 30 kbps, T=33 µs
     manchester_tx_init(33);
+    manchester_rx_init(33);
 
     // Programmer task on Core 1, priority 5 (timing-critical RMT work)
     xTaskCreatePinnedToCore(programmerTask, "Programmer", 8192, NULL, 5, NULL, 1);
@@ -63,23 +64,40 @@ void gpioConfig() {
 }
 
 // Programmer task — Core 1, priority 5.
-// Phase 3: transmit a known READ request frame every 2 s for scope verification.
-// READ FAULT_STATUS (0x20): R/W=1, ADDR=0x20, CRC computed by crc3_read_request().
+// Sends a READ request for FAULT_STATUS (0x20) every 2 s, then receives
+// the 44-bit device response via RMT Manchester RX and prints the decoded fields.
 void programmerTask(void *pvParameters) {
     const uint8_t addr = 0x20;                      // FAULT_STATUS register
-    const uint8_t crc  = crc3_read_request(addr);  // = 5  (verified by unit test)
+    const uint8_t crc  = crc3_read_request(addr);  // = 5 (verified by unit test)
 
-    // 12-bit frame, MSB-first: bits 11:10 = SYNC=00, bit 9 = R/W=1,
-    // bits 8:3 = ADDR[5:0], bits 2:0 = CRC[2:0].
-    // The implicit zeros above bit 9 already carry the SYNC value — no shift needed.
-    uint64_t frame = ((uint64_t)1   << 9) |   // R/W = 1
-                     ((uint64_t)addr << 3) |   // ADDR[6]
-                     ((uint64_t)crc);          // CRC[3]
+    // 12-bit TX frame, MSB-first:
+    // bits[11:10]=SYNC=00, bit[9]=R/W=1, bits[8:3]=ADDR[5:0], bits[2:0]=CRC[2:0]
+    const uint64_t tx_frame = ((uint64_t)1    << 9) |
+                               ((uint64_t)addr << 3) |
+                               ((uint64_t)crc);
 
-    Serial.printf("[PROG] READ FAULT_STATUS frame = 0x%03llX  CRC=%d\n", frame, crc);
+    Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", tx_frame, crc);
 
     for (;;) {
-        manchester_tx_send(frame, 12);
+        manchester_tx_send(tx_frame, 12);
+
+        // Device responds within 74 µs; arm RMT RX and wait up to 100 ms.
+        // Response frame: SYNC[2] | R/W[1] | ADDR[6] | DATA[32] | CRC[3] = 44 bits
+        uint64_t response = 0;
+        const uint8_t rx_bits = manchester_rx_receive(&response, 100);
+
+        if (rx_bits == 44) {
+            const uint8_t  rx_sync = (uint8_t)((response >> 42) & 0x3);
+            const uint8_t  rx_rw   = (uint8_t)((response >> 41) & 0x1);
+            const uint8_t  rx_addr = (uint8_t)((response >> 35) & 0x3F);
+            const uint32_t rx_data = (uint32_t)((response >> 3)  & 0xFFFFFFFFUL);
+            const uint8_t  rx_crc  = (uint8_t)(response & 0x7);
+            Serial.printf("[RX]  SYNC=%d R/W=%d ADDR=0x%02X DATA=0x%08X CRC=%d\n",
+                          rx_sync, rx_rw, rx_addr, rx_data, rx_crc);
+        } else {
+            Serial.printf("[RX]  timeout or decode error (%d bits)\n", rx_bits);
+        }
+
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }

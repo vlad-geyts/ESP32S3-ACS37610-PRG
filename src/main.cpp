@@ -64,22 +64,37 @@ void gpioConfig() {
 }
 
 // Programmer task — Core 1, priority 5.
-// Sends a READ request for FAULT_STATUS (0x20) every 2 s, then receives
-// the 44-bit device response via RMT Manchester RX and prints the decoded fields.
+// Boot sequence: send Access Code to open the device serial port, wait 120 µs settle.
+// Then loop every 2 s: send READ FAULT_STATUS request, receive and print 44-bit response.
 void programmerTask(void *pvParameters) {
-    const uint8_t addr = 0x20;                      // FAULT_STATUS register
-    const uint8_t crc  = crc3_read_request(addr);  // = 5 (verified by unit test)
 
-    // 12-bit TX frame, MSB-first:
-    // bits[11:10]=SYNC=00, bit[9]=R/W=1, bits[8:3]=ADDR[5:0], bits[2:0]=CRC[2:0]
-    const uint64_t tx_frame = ((uint64_t)1    << 9) |
-                               ((uint64_t)addr << 3) |
-                               ((uint64_t)crc);
+    // --- Access Code (opens device serial port, mandatory after every power cycle) ---
+    // 44-bit write frame: SYNC=00 | R/W=0 | ADDR=0x31 | DATA=0x2C413736 | CRC[3]
+    const uint32_t kAccessData = 0x2C413736UL;
+    const uint8_t  kAccessAddr = 0x31;
+    const uint8_t  ac_crc      = crc3_write(0, kAccessAddr, kAccessData);
+    const uint64_t ac_frame    = ((uint64_t)kAccessAddr  << 35) |
+                                  ((uint64_t)kAccessData  <<  3) |
+                                  ((uint64_t)ac_crc);
 
-    Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", tx_frame, crc);
+    Serial.printf("[AUTH] Sending Access Code  frame=0x%011llX  CRC=%d\n", ac_frame, ac_crc);
+    manchester_tx_send(ac_frame, 44);
+
+    // Wait 120 µs post-Access-Code settle before issuing any Read/Write command.
+    esp_rom_delay_us(120);
+    Serial.println("[AUTH] Port open — starting Read loop");
+
+    // --- Build READ FAULT_STATUS frame (12-bit read request, static) ---
+    const uint8_t  rd_addr  = 0x20;   // FAULT_STATUS register
+    const uint8_t  rd_crc   = crc3_read_request(rd_addr);
+    const uint64_t rd_frame = ((uint64_t)1       << 9) |
+                               ((uint64_t)rd_addr << 3) |
+                               ((uint64_t)rd_crc);
+
+    Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", rd_frame, rd_crc);
 
     for (;;) {
-        manchester_tx_send(tx_frame, 12);
+        manchester_tx_send(rd_frame, 12);
 
         // Device responds within 74 µs; arm RMT RX and wait up to 100 ms.
         // Response frame: SYNC[2] | R/W[1] | ADDR[6] | DATA[32] | CRC[3] = 44 bits

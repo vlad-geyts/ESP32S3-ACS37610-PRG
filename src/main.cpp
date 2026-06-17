@@ -13,6 +13,9 @@
 //C++: Namespaces & Constexpr --- 
 namespace Config {
 
+    // === Power enable signal ===
+    constexpr int PwrEn  = 5;
+
     // === Debug signals ===
     constexpr int StrobOut  = 21;
   
@@ -44,6 +47,10 @@ void setup() {
     manchester_tx_init(33);
     manchester_rx_init(33);
 
+    // Enable 3.3V power supply 
+    digitalWrite(Config::PwrEn, LOW);
+    delay(100); // delay to stabilize 3.3V power rail
+
     // Programmer task on Core 1, priority 5 (timing-critical RMT work)
     xTaskCreatePinnedToCore(programmerTask, "Programmer", 8192, NULL, 5, NULL, 1);
 
@@ -61,6 +68,9 @@ void gpioConfig() {
     pinMode(Config::LedPin, OUTPUT);
     pinMode(Config::StrobOut, OUTPUT);
     digitalWrite(Config::StrobOut, LOW);
+    pinMode(Config::PwrEn, OUTPUT);
+    digitalWrite(Config::PwrEn, HIGH); // turn of 3.3V LDO
+    delay(1000); //delay to set 3.3V rail to 0
 }
 
 // Programmer task — Core 1, priority 5.

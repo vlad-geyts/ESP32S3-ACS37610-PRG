@@ -25,7 +25,7 @@ namespace Config {
 
 // Global Objects
 Adafruit_NeoPixel ws2812(NUM_LEDS, WS2812_PIN, LED_TYPE);
-uint8_t acc_crc3 = 0;
+uint8_t acc_crc3 = 7;
 uint8_t rd_crc3 = 0;
 
 // Function Prototypes
@@ -45,9 +45,9 @@ void setup() {
     gpioConfig();
     ws2812.begin();
 
-    // Manchester TX (bit-bang) and RX (RMT_CHANNEL_1) — 30 kbps, T=33 µs
-    manchester_tx_init(33);
-    manchester_rx_init(33);
+    // Manchester TX (bit-bang) and RX (RMT_CHANNEL_1) — 10 kbps, T=100 µs (debug)
+    manchester_tx_init(500);
+    manchester_rx_init(500);
 
     // Enable 3.3V power supply 
     digitalWrite(Config::PwrEn, LOW);
@@ -82,19 +82,19 @@ void programmerTask(void *pvParameters) {
 
     // --- Access Code (opens device serial port, mandatory after every power cycle) ---
     // 44-bit write frame: SYNC=00 | R/W=0 | ADDR=0x31 | DATA=0x2C413736 | CRC[3]
-    const uint32_t kAccessData = 0x2C413736UL;
-    const uint8_t  kAccessAddr = 0x31;
-    const uint8_t  ac_crc      = crc3_write(0, kAccessAddr, kAccessData);
-    const uint64_t ac_frame    = ((uint64_t)kAccessAddr  << 35) |
-                                ((uint64_t)kAccessData  <<  3) |
-                                ((uint64_t)ac_crc);
+    //const uint32_t kAccessData = 0x2C413736UL;
+    //const uint8_t  kAccessAddr = 0x31;
+    //const uint8_t  ac_crc      = crc3_write(0, kAccessAddr, kAccessData);
+    //const uint64_t ac_frame    = ((uint64_t)kAccessAddr  << 35) |
+    //                            ((uint64_t)kAccessData  <<  3) |
+    //                            ((uint64_t)ac_crc);
 
-    Serial.printf("[AUTH] Sending Access Code  frame=0x%011llX  CRC=%d\n", ac_frame, ac_crc);
-    manchester_tx_send(ac_frame, 44);
+    //Serial.printf("[AUTH] Sending Access Code  frame=0x%011llX  CRC=%d\n", ac_frame, ac_crc);
+    //manchester_tx_send(ac_frame, 44);
 
     // Wait 120 µs post-Access-Code settle before issuing any Read/Write command.
-    esp_rom_delay_us(120);
-    Serial.println("[AUTH] Port open — starting Read loop");
+    //esp_rom_delay_us(120);
+    //Serial.println("[AUTH] Port open — starting Read loop");
 
     // --- Build READ FAULT_STATUS frame (12-bit read request, static) ---
     //const uint8_t  rd_addr  = 0x20;   // FAULT_STATUS register
@@ -110,8 +110,8 @@ void programmerTask(void *pvParameters) {
                     // 44-bit write frame: SYNC=00 | R/W=0 | ADDR=0x31 | DATA=0x2C413736 | CRC[3]
                     const uint32_t kAccessData = 0x2C413736UL;
                     const uint8_t  kAccessAddr = 0x31;
-//                    const uint8_t  ac_crc      = crc3_write(0, kAccessAddr, kAccessData);
-                    const uint8_t  ac_crc      = acc_crc3;
+                    const uint8_t  ac_crc      = crc3_write(0, kAccessAddr, kAccessData);
+                    //const uint8_t  ac_crc      = acc_crc3;
                     const uint64_t ac_frame    = ((uint64_t)kAccessAddr  << 35) |
                                                  ((uint64_t)kAccessData  <<  3) |
                                                  ((uint64_t)ac_crc);
@@ -125,17 +125,19 @@ void programmerTask(void *pvParameters) {
 
                     // --- Build READ FAULT_STATUS frame (12-bit read request, static) ---
                     const uint8_t  rd_addr  = 0x20;   // FAULT_STATUS register
-                    const uint8_t  rd_crc   = rd_crc3;
+                    const uint8_t  rd_crc   = crc3_read_request(rd_addr);
+                    //const uint8_t  rd_crc   = rd_crc3;
                     const uint64_t rd_frame = ((uint64_t)1       << 9) |
                                               ((uint64_t)rd_addr << 3) |
                                               ((uint64_t)rd_crc);
-
+                                              
+                    Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", rd_frame, rd_crc);
                     manchester_tx_send(rd_frame, 12);
 
-                    rd_crc3++;
-                    if(rd_crc3>7) {
-                        rd_crc3 = 0;
-                    }
+                    //rd_crc3++;
+                    //if(rd_crc3>7) {
+                    //    rd_crc3 = 0;
+                    //}
                         
                     vTaskDelay(pdMS_TO_TICKS(2000));
 

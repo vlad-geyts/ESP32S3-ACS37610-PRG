@@ -120,7 +120,7 @@ void programmerTask(void *pvParameters) {
                     manchester_tx_send(ac_frame, 44);
 
                     // Wait 120 µs post-Access-Code settle before issuing any Read/Write command.
-                    esp_rom_delay_us(120);
+                    esp_rom_delay_us(500);
                     Serial.println("[AUTH] Port open — starting Read loop");
 
                     // --- Build READ FAULT_STATUS frame (12-bit read request, static) ---
@@ -130,7 +130,7 @@ void programmerTask(void *pvParameters) {
                     const uint64_t rd_frame = ((uint64_t)1       << 9) |
                                               ((uint64_t)rd_addr << 3) |
                                               ((uint64_t)rd_crc);
-                                              
+
                     Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", rd_frame, rd_crc);
                     manchester_tx_send(rd_frame, 12);
 

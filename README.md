@@ -236,3 +236,129 @@ If you see `timeout or decode error (0 bits)` on the first cycle, the most likel
 `I'm working on a programmer for ACS37610 current sensor following "ACS37610_Programmer_Development_Plan_v4" (file located in "Documents" folder inside this project). There are some high level GUI implementation design requitremets, but they are not deatil enough for implementaion. Create a separate detailed GUI development plan using "ACS37610_Programmer_Development_Plan_v4" , my "GUI Implementation Ideas" (file located in "Documents" folder inside this project) and "Project Memory File" as reference documents`
 
 API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment. If it persists, check https://status.claude.com.
+
+
+**Plan — Create the ACS37610 GUI Development Plan document**
+
+*Context*
+
+The user is building an ESP32‑S3 programmer for the ACS37610 current sensor, guided by `Documents/ACS37610_Programmer_Development_Plan_v4.md` (header reads v4.1, "Approved"). That plan covers protocol, hardware, and firmware, but the host GUI is only sketched at a high level in `Documents/GUI Implementation Ideas.md` (8 requirements) and in dev‑plan Phase 5 ("Python CLI / GUI"). Neither is detailed enough to implement.
+
+*Goal*: produce a separate, detailed GUI development plan document — the same style and rigor as the existing dev plans — that an engineer can execute from. The deliverable of this task is a new markdown document, not code:
+
+`Documents/ACS37610_GUI_Development_Plan_v1.md`
+
+**Findings from exploration (current state)**
+
+- *No host/GUI code exists* — greenfield. No `*.py` anywhere in the repo.
+- Firmware has *no command parser*. `src/main.cpp` hardcodes: send AUTH once at boot, then loop a FAULT_STATUS (0x20) read every 2 s, printing to UART `Serial` @115200 (CH343 bridge, `ARDUINO_USB_MODE=0, ARDUINO_USB_CDC_ON_BOOT=0)`.
+- The ASCII command protocol the GUI needs (`AUTH/READ/WRAM/WEEP/PWRON/PWROFF/STATUS`, dev plan §4.4) and the `acs37610_cmd.cpp / usb_cdc.cpp` modules (§4.3) are *not implemented*.
+- Existing libs: `lib/crc3/` (CRC‑3, tested) and `lib/manchester/` (bit‑bang TX + RMT RX). These are the primitives the firmware command layer will call.
+
+**Decisions locked with the user**
+  1. *GUI stack*: Python + *PySide6/Qt* (rich multi‑tab HMI).
+  2. *Firmware scope*: this plan covers both the host GUI and the firmware‑side command parser that replaces the hardcoded loop in `src/main.cpp` — delivered end‑to‑end.
+  3. EE_CUST2 address: use 0x0B (dev plan v4.1 §2.7, Approved); record the 0x08 value from the ideas doc as a discrepancy/open item to confirm against the datasheet.
+
+**Deliverable: structure of** `ACS37610_GUI_Development_Plan_v1.md`
+
+The document will contain the sections below. Key technical content is sketched here so the substance can be validated before the full doc is written.
+
+
+1. **Overview & Scope**
+  - Purpose, relationship to dev plan v4.1 (this is the GUI companion to Phase 5).
+  - In scope: host GUI (PySide6) + firmware command parser. Out of scope: protocol/hardware (owned by v4.1).
+  - Transport note: protocol is transport‑agnostic — works over the current CH343 UART COM port today and over native USB‑CDC later (a firmware build‑flag switch, dev plan §4.1/Phase 5).
+
+2. **System Architecture**
+  - Layered diagram: *PySide6 GUI* ↔ (ASCII line protocol over serial COM) ↔ *ESP32‑S3 command parser* → `acs37610_cmd → manchester/crc3` → PROG line → DUT.
+  - Threading model on host: Qt UI thread + serial worker thread (never block the UI).
+
+3. **Host↔Firmware Serial Command Protocol (the contract — linchpin section)**
+
+Line‑based ASCII, `\n`‑terminated, one response per command. Draft grammar:
+
+Command	Args	Response (success)	Notes
+*IDN? / PING	—	ID ACS37610-PRG <fw_ver>	Connection/comm‑status probe
+STATUS	—	STATUS PWR=<0/1> PORT=<0/1> ERR=<code>	Drives Power indicator
+PWRON	—	OK	PWR_EN low → DUT 3.3 V on
+PWROFF	—	OK	PWR_EN high → DUT off
+AUTH	—	OK	Access Code 0x2C413736→0x31; 120 µs settle; opens port
+READ	<addr>	DATA <addr> <hex32> ECC=<OK/FAIL/NA>	EEPROM reads report ECC (DATA[27:26])
+WRAM	<addr> <hex>	OK	Write shadow/RAM (volatile)
+WEEP	<addr> <hex>	OK VERIFY=OK / ERR VERIFY	Enforces t_w 35 ms + read‑back verify
+(errors)	—	ERR <CRC/ECC/TIMEOUT/VERIFY/LOCKED/ARG>	Uniform error replies
+
+  - All addresses/data in hex; data is the 26‑bit payload. Firmware echoes <addr> for host correlation. Full request/response examples and a state table (port‑open required before READ/WRITE) will be included.
+
+4. **Firmware Command Parser (firmware‑side scope)**
+  - New module `lib/cmd_parser/` (or `src/usb_cdc.cpp` per §4.3): reads lines from `Serial`, dispatches to handlers, emits ASCII responses. Runs as the programmer task — *replaces* the hardcoded boot‑AUTH + 2 s read loop in `src/main.cpp`.
+  - New module `lib/acs37610_cmd/`: frame builders for all 4 commands (refactor the inline frame building currently in `main.cpp`), CRC via `crc3`, TX/RX via `manchester`, DATA[31:26]=0 on EEPROM writes, t_w delay, verify‑after‑write, DATA[27:26] ECC check on EEPROM reads.
+  - AUTH sequencing kept as a primitive command; host orchestrates PWRON→AUTH→settle (matches §4.5). Power‑on auto‑AUTH is offered as an optional convenience.
+  - Error‑code table; testability via native env / loopback (reuse [env:native] pattern).
+  - Note: USB‑CDC enablement (`ARDUINO_USB_CDC_ON_BOOT=1`) is a later toggle; parser works over the current UART unchanged.
+
+5. **Host GUI Architecture (PySide6)**
+
+  - Python package layout, e.g. `host/acs_gui/`: `transport.py` (QThread + pyserial, port open/close/auto‑detect, signals on rx/err), `protocol.py` (typed client: `read_register/write_ram/write_eeprom/auth/power_on/`...), `registers.py` (data model + bit‑field codec), `widgets/` (status‑bar indicator, field table), `views/` (one per tab), `mainwindow.py`, `app.py`, requirements.txt.
+  - Reusable `StatusIndicator` widget with color states (Idle/Active/Completed/Fail/red‑green).
+
+6. **Register / Data Model (from dev plan §2.7)**
+
+Table of all registers with bit‑field maps + 26‑bit encode/decode helpers:
+
+Tab	EEPROM	Shadow	Access	Fields
+EE_CUST0	0x09	0x19	R/W	WRITE_LOCK[25], COM_LOCK[24], OTF_DIS[22], POL[21], CLAMP_EN[20], FAULT_DIS[19], FAULTR_DIS[18], QVO[17:9], SENS_FINE[8:0]
+EE_CUST1	0x0A	0x1A	R/W	OCF_HYST[25:24], FAULT_LATCH[23], OCF_P_DIS[22], OCF_N_DIS[21], OCF_QUAL[20:18], OTF_THRESH[17:14], OCF_N_THRES[13:7], OCF_P_THRES[6:0]
+EE_CUST2	0x0B	—	R/W	C_SPARE[25:0] (ideas doc says 0x08 — flagged open item)
+FAULT_STATUS	0x20	—	RO	TEMP_OUT[27:16], UV/OV/OC/OT/FP_STAT[12:8], UV/OV/OC/OT/FP_EV[4:0]
+
+  - Nuance to document: FAULT_STATUS is decoded from the full 32‑bit response (TEMP_OUT extends to bit 27); DATA[27:26] are [not] ECC here (volatile register).
+
+7. **GUI Screen Specifications (per tab) — maps every ideas‑doc requirement**
+
+  - *Main tab*: COM‑port selector + Connect; Communication status bar (green=talking, red=not); Power status bar (green=DUT powered, red=off); Power On/Power Off buttons (PWR_EN low/high); Read All button + Read All status bar (green=complete, red=fail/CRC); Save All to file / Load All from file; activity log panel.
+  - *EE_CUST0 / EE_CUST1 tabs* : EEPROM + Shadow value columns, per‑field editors, Read and Write buttons each with a status bar. Recommended extra: Write Shadow (RAM) vs Write EEPROM to support the dev‑plan RAM‑first‑then‑commit safe workflow.
+  - *EE_CUST2 tab*: single C_SPARE field, Read/Write + status bars.
+  - *FAULT_STATUS tab*: read‑only field display, Read button only + status bar (per req #3).
+  - WRITE_LOCK[25] safety guard: disabled by default + confirm dialog (it permanently locks the device — dev plan §2.7 / R2).
+
+8. **Feature Workflows (step sequences incl. firmware commands)**
+
+Connect & comm status; Power On/Off (+ auto‑AUTH); Read All; per‑register Read; per‑register Write with read‑back compare → green/red (req #8, applied to RAM and EEPROM since firmware verifies only WEEP); Edit fields; Save to file; Load from file.
+
+9. **File Format (save/load, req #4/#5)**
+
+JSON schema: device id, timestamp, fw version, per‑register {`name, addr, raw_hex, fields{}`}. Load populates the editors for review before any write.
+
+10. **Development Phases & Schedule (GUI sub‑phases)**
+
+  - G1 Protocol contract + firmware parser (`cmd_parser` + `acs37610_cmd`, replace main loop).
+  - G2 Host transport + protocol client (mock‑serial unit tests).
+  - G3 Register model + codec (unit‑tested encode/decode round‑trips).
+  - G4 Main tab: connect, comm/power indicators, power, Read All.
+  - G5 Register tabs: Read/Write/verify, field editors, WRITE_LOCK guard.
+  - G6 Save/Load file.
+  - G7 End‑to‑end validation on hardware + operator polish.
+
+11. **Testing & Verification**
+Firmware: native/loopback command tests. Host: pytest for codec + a mock serial port for protocol client and GUI logic without hardware. End‑to‑end: GUI ↔ ESP32 ↔ DUT — connect, Read All, RAM write+verify, EEPROM write+verify, save/load round‑trip, fault read.
+
+12. **Risks & Open Items**
+EE_CUST2 0x08 vs 0x0B (confirm vs datasheet); AUTH/port‑open sequencing ownership; USB‑CDC vs UART COM enumeration on Windows; WRITE_LOCK OTP safety; serial concurrency (single in‑flight command).
+
+13. **Requirements Traceability Matrix**
+Table mapping each of the 8 ideas‑doc requirements (and sub‑bullets) → plan section / GUI element, to prove full coverage.
+
+**Verification of the deliverable**
+
+This task produces a document, so verification = review:
+  - Confirm `Documents/ACS37610_GUI_Development_Plan_v1.md` exists and renders cleanly.
+  - Spot‑check the traceability matrix: all 8 ideas‑doc requirements covered.
+  - Confirm register table matches dev plan §2.7 (esp. EE_CUST2=0x0B flagged, FAULT_STATUS RO).
+  - Confirm the protocol contract is consistent with dev plan §4.4/§4.5 command set and timing.
+
+
+**Notes**
+  - Only a new document is created; no firmware or existing files are modified by this task. The firmware parser work is specified in the document for later execution, not implemented here.
+  - If the user later wants, the same doc can seed a v4.2 cross‑reference back into the main plan.

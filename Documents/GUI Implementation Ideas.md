@@ -2,7 +2,7 @@
 - `Main` tab: Progtrammer dashboard.
 - `EE_CUST0` tab: To display parameters values of EEPROM (0x09) and Shadow Register (0x19).
 - `EE_CUST1` tab: To display parameters values of EEPROM (0x0A) and shadow register (0x1A)
-- `EE_CUST2` tab: To display value of EEPROM (0x08).
+- `EE_CUST2` tab: To display value of EEPROM (0x0B).
 - `FAULT_STATUS` tab: To display parameters of Volatile Register (0x20)
 
 

@@ -232,3 +232,7 @@ Expected serial output when the device is responding:
 [RX]  SYNC=0 R/W=0 ADDR=0x20 DATA=0x...  CRC=...
 
 If you see `timeout or decode error (0 bits)` on the first cycle, the most likely cause is the idle_threshold catching the 74 µs turnaround — bump it from 500 to 1000 ticks in `manchester_rx_init` and retry.
+
+`I'm working on a programmer for ACS37610 current sensor following "ACS37610_Programmer_Development_Plan_v4" (file located in "Documents" folder inside this project). There are some high level GUI implementation design requitremets, but they are not deatil enough for implementaion. Create a separate detailed GUI development plan using "ACS37610_Programmer_Development_Plan_v4" , my "GUI Implementation Ideas" (file located in "Documents" folder inside this project) and "Project Memory File" as reference documents`
+
+API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment. If it persists, check https://status.claude.com.

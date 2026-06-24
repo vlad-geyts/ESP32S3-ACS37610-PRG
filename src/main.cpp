@@ -25,6 +25,7 @@ namespace Config {
 
 // Global Objects
 Adafruit_NeoPixel ws2812(NUM_LEDS, WS2812_PIN, LED_TYPE);
+uint8_t  crc3=7; 
 
 // Function Prototypes
 void heartbeatTask(void *pvParameters);
@@ -44,8 +45,11 @@ void setup() {
     ws2812.begin();
 
     // Manchester TX (bit-bang) and RX (RMT_CHANNEL_1) — 30 kbps, T=33 µs
-    manchester_tx_init(33);
-    manchester_rx_init(33);
+    //manchester_tx_init(33);
+    //manchester_rx_init(33);
+
+    manchester_tx_init(80);
+    manchester_rx_init(80);
 
     // Enable 3.3V power supply 
     digitalWrite(Config::PwrEn, LOW);
@@ -80,7 +84,7 @@ void programmerTask(void *pvParameters) {
 
     // --- Access Code (opens device serial port, mandatory after every power cycle) ---
     // 44-bit write frame: SYNC=00 | R/W=0 | ADDR=0x31 | DATA=0x2C413736 | CRC[3]
-    const uint32_t kAccessData = 0x2C413736UL;
+    const uint32_t kAccessData = 0x2C413737UL;
     const uint8_t  kAccessAddr = 0x31;
     const uint8_t  ac_crc      = crc3_write(0, kAccessAddr, kAccessData);
     const uint64_t ac_frame    = ((uint64_t)kAccessAddr  << 35) |
@@ -91,12 +95,15 @@ void programmerTask(void *pvParameters) {
     manchester_tx_send(ac_frame, 44, /*start_mark=*/true, /*end_mark=*/true);
 
     // Wait 120 µs post-Access-Code settle before issuing any Read/Write command.
-    esp_rom_delay_us(120);
+    //esp_rom_delay_us(120);
+    delay(1000);
+
     Serial.println("[AUTH] Port open — starting Read loop");
 
     // --- Build READ FAULT_STATUS frame (12-bit read request, static) ---
     const uint8_t  rd_addr  = 0x20;   // FAULT_STATUS register
-    const uint8_t  rd_crc   = crc3_read_request(rd_addr);
+//    const uint8_t  rd_crc   = crc3_read_request(rd_addr);
+    const uint8_t  rd_crc   = crc3;
     const uint64_t rd_frame = ((uint64_t)1       << 9) |
                                ((uint64_t)rd_addr << 3) |
                                ((uint64_t)rd_crc);
@@ -104,26 +111,27 @@ void programmerTask(void *pvParameters) {
     Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", rd_frame, rd_crc);
 
     for (;;) {
+
         manchester_tx_send(rd_frame, 12, /*start_mark=*/true, /*end_mark=*/false);
 
         // Device responds within 74 µs; arm RMT RX and wait up to 100 ms.
         // Response frame: SYNC[2] | R/W[1] | ADDR[6] | DATA[32] | CRC[3] = 44 bits
-        uint64_t response = 0;
-        const uint8_t rx_bits = manchester_rx_receive(&response, 100);
+    //    uint64_t response = 0;
+    //    const uint8_t rx_bits = manchester_rx_receive(&response, 100);
 
-        if (rx_bits == 44) {
-            const uint8_t  rx_sync = (uint8_t)((response >> 42) & 0x3);
-            const uint8_t  rx_rw   = (uint8_t)((response >> 41) & 0x1);
-            const uint8_t  rx_addr = (uint8_t)((response >> 35) & 0x3F);
-            const uint32_t rx_data = (uint32_t)((response >> 3)  & 0xFFFFFFFFUL);
-            const uint8_t  rx_crc  = (uint8_t)(response & 0x7);
-            Serial.printf("[RX]  SYNC=%d R/W=%d ADDR=0x%02X DATA=0x%08X CRC=%d\n",
-                          rx_sync, rx_rw, rx_addr, rx_data, rx_crc);
-        } else {
-            Serial.printf("[RX]  timeout or decode error (%d bits)\n", rx_bits);
-        }
+    //    if (rx_bits == 44) {
+    //        const uint8_t  rx_sync = (uint8_t)((response >> 42) & 0x3);
+    //        const uint8_t  rx_rw   = (uint8_t)((response >> 41) & 0x1);
+    //        const uint8_t  rx_addr = (uint8_t)((response >> 35) & 0x3F);
+    //        const uint32_t rx_data = (uint32_t)((response >> 3)  & 0xFFFFFFFFUL);
+    //        const uint8_t  rx_crc  = (uint8_t)(response & 0x7);
+    //        Serial.printf("[RX]  SYNC=%d R/W=%d ADDR=0x%02X DATA=0x%08X CRC=%d\n",
+    //                      rx_sync, rx_rw, rx_addr, rx_data, rx_crc);
+    //    } else {
+    //        Serial.printf("[RX]  timeout or decode error (%d bits)\n", rx_bits);
+    //    }
 
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
 

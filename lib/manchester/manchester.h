@@ -18,7 +18,12 @@ void manchester_tx_init(uint32_t bit_period_us = 33);
 
 // Transmit bit_count bits from 'bits', MSB first. Blocks until done.
 // bit_count: 1–44 (ACS37610 max frame = SYNC[2]+R/W[1]+ADDR[6]+DATA[32]+CRC[3]).
-void manchester_tx_send(uint64_t bits, uint8_t bit_count);
+//
+// start_mark: pull PROG LOW for 74 µs before the first bit (required by ACS37610).
+// end_mark:   pull PROG LOW for 74 µs after the last bit (Write commands only;
+//             omit for Read — PROG must be released to High-Z so device can respond).
+void manchester_tx_send(uint64_t bits, uint8_t bit_count,
+                        bool start_mark = false, bool end_mark = false);
 
 // Initialise Manchester RX. Call once from setup(), after manchester_tx_init().
 // Configures RMT_CHANNEL_1 on GPIO4 and re-applies INPUT_OUTPUT_OD so TX still works.

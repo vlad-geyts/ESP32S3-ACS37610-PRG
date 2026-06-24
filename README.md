@@ -362,3 +362,59 @@ This task produces a document, so verification = review:
 **Notes**
   - Only a new document is created; no firmware or existing files are modified by this task. The firmware parser work is specified in the document for later execution, not implemented here.
   - If the user later wants, the same doc can seed a v4.2 cross‑reference back into the main plan.
+
+
+`Done. I created the detailed GUI development plan and recorded the key decisions in project memory.`
+
+**What I delivered**
+[Documents/ACS37610_GUI_Development_Plan_v1.md] — a 542-line executable spec in the same style/rigor as the existing dev plans, with 13 sections:
+
+  1. *Overview & Scope* — companion to dev plan v4.1 Phase 5; transport-agnostic (CH343 UART now, USB-CDC later)
+  2. *System Architecture* — layered diagram + host threading model (Qt UI thread + serial worker)
+  3. *Serial Command Protocol* — the linchpin contract: ASCII line grammar (`*IDN?/STATUS/PWRON/PWROFF/AUTH/READ/WRAM/WEEP`), error codes, port-open state rules, annotated example session
+  4. *Firmware Command Parser* — new `lib/cmd_parser/` + `lib/acs37610_cmd/` modules replacing the hardcoded loop in `src/main.cpp`
+  5. *Host GUI Architecture (PySide6)* — package layout, layer responsibilities, comm-status logic
+  6. *Register/Data Model* — full §2.7 bit-field maps + codec, with the FAULT_STATUS 32-bit decode nuance
+  7. *Screen Specs* — per-tab widget/button/status-bar tables + WRITE_LOCK OTP safety guard
+  8. *Feature Workflows* — connect, power, Read All, per-register read, write-with-readback-compare, edit, save/load
+  9. *File Format* — versioned JSON schema
+  10. *Phased Schedule (G1–G7)* mapped to v4.1 Phase 5
+  11. *Testing* — native/loopback firmware + pytest/mock-serial host + end-to-end
+  12. *Risks & Open Items*
+  13. *Requirements Traceability Matrix* — all 8 ideas-doc requirements mapped to plan sections
+
+
+**Decisions baked in**
+  - [PySide6/Qt] host, *firmware parser in scope* (end-to-end), *EE_CUST2 = 0x0B* (the ideas doc's `0x08` is flagged as open item O1 to confirm against the datasheet).
+
+**Two things worth your attention**
+  - *O1 — EE_CUST2 address conflict* (0x08 ideas doc vs 0x0B v4.1 §2.7): I used 0x0B and centralized it in registers.py so it's a one-line change once you confirm against the Allegro datasheet.
+  - The plan documents that the firmware *has no command interface today* — `acs37610_cmd.cpp` doesn't exist and `main.cpp'`s hardcoded read loop must be replaced. That firmware work (phase G1) is specified here but, per scope, not implemented in this task.
+
+
+No firmware or existing files were modified — only the new document was added (plus a project-memory note for future GUI sessions). 
+
+
+`BY ME: The devica is not responding to read command. The root couse is missing what I'd call "start " and "end" marks (PROG signal is pull down by controller for 74us)`  
+  1) `The Wite Access Code command should begin with "start" mark. followed by 2 sync bits and ended with "end" marks after sending the last CRC3 bit. After that PROG line should be pulled by contreoller high.` 
+  2) `The Read Command shoud beging with "start" mark followe by 2 sync bits. No "end" mark after last CRC3 bit. The PROG line should remain in High Z state. The device will pul PROG line low for 74us and we should start receive data. After data will be transmitted byt device it again pull PROG line low for 74us and release PGOG line to High Z state.`
+
+
+*Clean build. Here's a summary of every change:*
+
+`manchester.h — manchester_tx_send` gains two optional bool parameters (`start_mark = false`, `end_mark = false`). Existing callers without marks still compile without change.
+
+`manchester.cpp` — two updates:
+
+- TX: before the first bit, if `start_mark`, pulls PROG LOW for 74 µs. After the last bit, if `end_mark`, pulls LOW for 74 µs. Then releases to HIGH in both cases.
+
+- RX decoder (`decode_rmt`): any LOW pulse ≥ `mark_thresh` (74 µs − T/4) is recognised as a device mark. It's stripped, but if the pulse is longer than `mark_ticks` (meaning a Manchester half-period was fused onto the front), that remaining half-period is still emitted — so the first SYNC bit is decoded correctly.
+
+- `main.cpp — manchester_tx_send` calls updated:
+
+1) Access Code: (`ac_frame, 44, true, true`) — start + end marks (write command)
+2) Read request: (`rd_frame, 12, true, false`) — start mark only; PROG released to High-Z so device can drive its response
+The waveform on scope should now look like: `LOW(74µs) | Manchester data | LOW(74µs) | HIGH` for the Access Code, and `LOW(74µs) | Manchester data | HIGH` for the Read request.
+
+
+.

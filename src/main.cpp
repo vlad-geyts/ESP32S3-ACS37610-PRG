@@ -88,7 +88,7 @@ void programmerTask(void *pvParameters) {
                                   ((uint64_t)ac_crc);
 
     Serial.printf("[AUTH] Sending Access Code  frame=0x%011llX  CRC=%d\n", ac_frame, ac_crc);
-    manchester_tx_send(ac_frame, 44);
+    manchester_tx_send(ac_frame, 44, /*start_mark=*/true, /*end_mark=*/true);
 
     // Wait 120 µs post-Access-Code settle before issuing any Read/Write command.
     esp_rom_delay_us(120);
@@ -104,7 +104,7 @@ void programmerTask(void *pvParameters) {
     Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", rd_frame, rd_crc);
 
     for (;;) {
-        manchester_tx_send(rd_frame, 12);
+        manchester_tx_send(rd_frame, 12, /*start_mark=*/true, /*end_mark=*/false);
 
         // Device responds within 74 µs; arm RMT RX and wait up to 100 ms.
         // Response frame: SYNC[2] | R/W[1] | ADDR[6] | DATA[32] | CRC[3] = 44 bits

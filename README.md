@@ -417,4 +417,122 @@ No firmware or existing files were modified — only the new document was added 
 The waveform on scope should now look like: `LOW(74µs) | Manchester data | LOW(74µs) | HIGH` for the Access Code, and `LOW(74µs) | Manchester data | HIGH` for the Read request.
 
 
-.
+`By Me: Which additinal SW developement tools should be installed on my computer to start QUI developemt? I'm assuming we still still can use VS Code, the VS Studio will not be required. Please adivise, I do not have expirience with developing Windows applications.`
+
+Good question — and you're right to check before installing anything heavy. Let me quickly look at what's already on your machine so I can give you concrete steps rather than generic ones.
+
+
+
+**PowerShell Detect Python, pip, VS Code, and COM ports on the system**
+
+Write-Output "=== Python launcher (py) ==="
+$py = Get-Command py -ErrorAction SilentlyContinue
+if ($py) { py --version 2>&1; Write-Output "Installed versions:"; py -0p 2>&1 } else { Write-Output "py launcher NOT found" }
+
+Write-Output "`n=== python on PATH ==="
+$python = Get-Command python -ErrorAction SilentlyContinue
+if ($python) { Write-Output "python -> $($python.Source)" } else { Write-Output "python NOT on PATH" }
+
+Write-Output "`n=== pip ==="
+$pip = Get-Command pip -ErrorAction SilentlyContinue
+if ($pip) { pip --version 2>&1 } else { Write-Output "pip NOT on PATH" }
+
+Write-Output "`n=== VS Code (code) ==="
+$code = Get-Command code -ErrorAction SilentlyContinue
+if ($code) { Write-Output "code -> $($code.Source)" } else { Write-Output "code NOT on PATH (may still be installed)" }
+
+Write-Output "`n=== Serial COM ports currently visible ==="
+$ports = [System.IO.Ports.SerialPort]::GetPortNames()
+if ($ports) { $ports } else { Write-Output "No COM ports detected right now (ESP32 may be unplugged)" }
+
+
+N
+Write-Output "=== Python launcher (py) ==="
+$py = Get-Command py -ErrorAction SilentlyContinue
+if ($py) { py --version 2>&1; Write-Output "Installed versions:"; py -0p 2>&1 } else { Write-Output "py launcher NOT found" }
+
+Write-Output "`n=== python on PATH ==="
+$python = Get-Command python -ErrorAction SilentlyContinue
+if ($python) { Write-Output "python -> $($python.Source)" } else { Write-Output "python NOT on PATH" }
+
+Write-Output "`n=== pip ==="
+$pip = Get-Command pip -ErrorAction SilentlyContinue
+if ($pip) { pip --version 2>&1 } else { Write-Output "pip NOT on PATH" }
+
+Write-Output "`n=== VS Code (code) ==="
+$code = Get-Command code -ErrorAction SilentlyContinue
+if ($code) { Write-Output "code -> $($code.Source)" } else { Write-Output "code NOT on PATH (may still be installed)" }
+
+
+
+
+
+
+Write-Output "`n=== Serial COM ports currently visible ==="
+$ports = [System.IO.Ports.SerialPort]::GetPortNames()
+if ($ports) { $ports } else { Write-Output "No COM ports detected right now (ESP32 may be unplugged)" }
+
+OUT
+=== Python launcher (py) ===
+py launcher NOT found
+
+
+**Here's what I found on your machine — it shapes the advice:**
+
+✅ VS Code is installed and on PATH.
+✅ Serial drivers work — COM3/5/6/7 are present, so your CH343 USB-UART bridge (how the ESP32 talks to the PC) is already installed. No driver work needed.
+❌ No real Python. The python that shows up is the Microsoft Store stub (...\WindowsApps\python.exe) — a placeholder that just opens the Store. py launcher and pip are both missing.
+So Python is the only real thing you need to install. Everything else is pip packages.
+
+
+**Direct answers to your questions**
+
+Visual Studio (the big IDE)? ❌ Not required. That's for C++/.NET. PySide6 is pure Python.
+Keep using VS Code? ✅ Yes. It's all you need.
+Qt SDK / Qt Creator / a C++ compiler / MinGW? ❌ None of them. The PySide6 pip package ships Qt itself precompiled inside the wheel — that's the part people assume is a giant separate install, and it isn't. (The MinGW in your project notes is only for the firmware's native unit tests, not the GUI.)
+
+
+**What to install**
+Tool	              How	                               Why
+*Python 3.12*	        `winget` or python.org installer	The runtime. The one genuine install.
+*PySide6*           	`pip install`                     Qt GUI framework (bundles Qt — no separate SDK)
+*pyserial*            `pip install`	                    Talk to the ESP32 over the COM port
+*pytest*              `pip install`	                    Run the host unit tests from the plan
+*VS Code: Python + Pylance* 
+*extensions*	        VS Code Extensions panel	        Editing, IntelliSense, debugging, running the venv
+
+Optional later: the *Ruff* extension (formatting/linting), and *Qt Designer* — which already comes with PySide6 as the `pyside6-designer` command if you ever want to draw UIs visually instead of in code (our plan builds them in code, so it's optional).
+
+
+**Step-by-step (PowerShell)**
+
+# 1) Install Python 3.12 (one-time). winget avoids the Store-stub problem.
+winget install -e --id Python.Python.3.12
+#    -> CLOSE and reopen the terminal afterward so PATH updates, then verify:
+py --version          # should print Python 3.12.x
+
+# 2) Create an isolated environment for the GUI (keeps it separate from system Python)
+cd c:\Data\PlatformIO\ESP32S3-ACS37610-PRG
+py -m venv host\.venv
+host\.venv\Scripts\Activate.ps1     # prompt now shows (.venv)
+
+# 3) Install the GUI dependencies INTO that environment
+python -m pip install --upgrade pip
+python -m pip install PySide6 pyserial pytest
+
+
+**Two Windows gotchas to expect
+
+1. *PowerShell may block the* `Activate.ps1` script ("running scripts is disabled"). Fix once, for your user only:
+
+      Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+
+2. *The Store-stub* `python`. After installing real Python, if typing `python` still opens the Store, turn off the alias: *Settings → Apps → Advanced app settings → App execution aliases → toggle off* `python.exe` and `python3.exe`. Using `py` (the launcher) sidesteps this entirely.
+
+A few notes:
+
+  - The *virtual environment (venv)* is just a project-local folder holding Python + the packages, so the GUI's dependencies never collide with PlatformIO's bundled Python or anything else. You "activate" it in a terminal to work on the GUI. This is standard practice and the plan assumes it (`host/requirements.txt`).
+  - *PlatformIO/firmware needs no new tools* — the firmware command-parser part of the plan (G1) uses the toolchain you already have.
+  - The PySide6 download is fairly large (~150–200 MB because it includes Qt). One-time.
+  
+Want me to run steps 2 and 3 for you (create the host\.venv and install the packages)? I'll leave step 1 (installing Python) to you to run first, since it's a system-wide install — tell me once py --version works and I'll take it from there.

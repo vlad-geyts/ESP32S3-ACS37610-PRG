@@ -115,7 +115,7 @@ void programmerTask(void *pvParameters) {
 //--------------------------------------------------------------------------------------------------------------        
                         // Enable 3.3V power supply 
                         digitalWrite(Config::PwrEn, LOW);
-                        delay(20); // delay to stabilize 3.3V power rail
+                        delay(1000); // delay to stabilize 3.3V power rail
 
                         // --- Access Code (opens device serial port, mandatory after every power cycle) ---
                         // 44-bit write frame: SYNC=00 | R/W=0 | ADDR=0x31 | DATA=0x2C413736 | CRC[3]
@@ -136,7 +136,7 @@ void programmerTask(void *pvParameters) {
 
                         Serial.printf("[AUTH] Sending Access Code  frame=0x%011llX  CRC=%d\n", ac_frame, ac_crc);
                         manchester_tx_send(ac_frame, 44, /*start_mark=*/false, /*end_mark=*/false);
-                        esp_rom_delay_us(120);
+                        esp_rom_delay_us(500);
 
 
                         // --- Build READ FAULT_STATUS frame (12-bit read request, static) ---
@@ -160,7 +160,7 @@ void programmerTask(void *pvParameters) {
 
                         // Disable 3.3V power supply 
                         digitalWrite(Config::PwrEn, HIGH); // turn of 3.3V LDO
-                        //delay(1000); //delay to set 3.3V rail to 0
+                        delay(1000); //delay to set 3.3V rail to 0
 //--------------------------------------------------------------------------------------------------------------                    
 //        manchester_tx_send(rd_frame, 12, /*start_mark=*/true, /*end_mark=*/false);
 
@@ -181,7 +181,7 @@ void programmerTask(void *pvParameters) {
     //        Serial.printf("[RX]  timeout or decode error (%d bits)\n", rx_bits);
     //    }
 
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
 

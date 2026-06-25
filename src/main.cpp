@@ -135,7 +135,7 @@ void programmerTask(void *pvParameters) {
 
 
                         Serial.printf("[AUTH] Sending Access Code  frame=0x%011llX  CRC=%d\n", ac_frame, ac_crc);
-                        manchester_tx_send(ac_frame, 44, /*start_mark=*/true, /*end_mark=*/true);
+                        manchester_tx_send(ac_frame, 44, /*start_mark=*/false, /*end_mark=*/false);
                         esp_rom_delay_us(120);
 
 
@@ -147,7 +147,7 @@ void programmerTask(void *pvParameters) {
                                                     ((uint64_t)rd_crc);
 
                         Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", rd_frame, rd_crc);
-                        manchester_tx_send(rd_frame, 12, /*start_mark=*/true, /*end_mark=*/false);
+                        manchester_tx_send(rd_frame, 12, /*start_mark=*/false, /*end_mark=*/false);
 
                         RX_CRC++;
                         if(RX_CRC > 7) {
@@ -205,7 +205,7 @@ void heartbeatTask(void *pvParameters) {
         ws2812.show();          // Push data to the LED
         ledOn = !ledOn;         // Toggle state
 
-        vTaskDelay(pdMS_TO_TICKS(500));  
+        vTaskDelay(pdMS_TO_TICKS(600000));  
     }
 }
 

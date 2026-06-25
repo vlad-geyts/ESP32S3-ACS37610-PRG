@@ -25,7 +25,6 @@ namespace Config {
 
 // Global Objects
 Adafruit_NeoPixel ws2812(NUM_LEDS, WS2812_PIN, LED_TYPE);
-uint8_t  crc3=7; 
 
 // Function Prototypes
 void heartbeatTask(void *pvParameters);
@@ -48,8 +47,8 @@ void setup() {
     //manchester_tx_init(33);
     //manchester_rx_init(33);
 
-    manchester_tx_init(80);
-    manchester_rx_init(80);
+    manchester_tx_init(33);
+    manchester_rx_init(33);
 
     // Enable 3.3V power supply 
     digitalWrite(Config::PwrEn, LOW);
@@ -73,8 +72,8 @@ void gpioConfig() {
     pinMode(Config::StrobOut, OUTPUT);
     digitalWrite(Config::StrobOut, LOW);
     pinMode(Config::PwrEn, OUTPUT);
-    digitalWrite(Config::PwrEn, HIGH); // turn of 3.3V LDO
-    delay(1000); //delay to set 3.3V rail to 0
+//    digitalWrite(Config::PwrEn, HIGH); // turn of 3.3V LDO
+//    delay(1000); //delay to set 3.3V rail to 0
 }
 
 // Programmer task — Core 1, priority 5.
@@ -84,35 +83,86 @@ void programmerTask(void *pvParameters) {
 
     // --- Access Code (opens device serial port, mandatory after every power cycle) ---
     // 44-bit write frame: SYNC=00 | R/W=0 | ADDR=0x31 | DATA=0x2C413736 | CRC[3]
-    const uint32_t kAccessData = 0x2C413737UL;
-    const uint8_t  kAccessAddr = 0x31;
-    const uint8_t  ac_crc      = crc3_write(0, kAccessAddr, kAccessData);
-    const uint64_t ac_frame    = ((uint64_t)kAccessAddr  << 35) |
-                                  ((uint64_t)kAccessData  <<  3) |
-                                  ((uint64_t)ac_crc);
+//    const uint32_t kAccessData = 0x2C413737UL;
+//    const uint8_t  kAccessAddr = 0x31;
+//    const uint8_t  ac_crc      = crc3_write(0, kAccessAddr, kAccessData);
+//    const uint64_t ac_frame    = ((uint64_t)kAccessAddr  << 35) |
+//                                  ((uint64_t)kAccessData  <<  3) |
+//                                  ((uint64_t)ac_crc);
 
-    Serial.printf("[AUTH] Sending Access Code  frame=0x%011llX  CRC=%d\n", ac_frame, ac_crc);
-    manchester_tx_send(ac_frame, 44, /*start_mark=*/true, /*end_mark=*/true);
+//    Serial.printf("[AUTH] Sending Access Code  frame=0x%011llX  CRC=%d\n", ac_frame, ac_crc);
+//    manchester_tx_send(ac_frame, 44, /*start_mark=*/true, /*end_mark=*/true);
 
     // Wait 120 µs post-Access-Code settle before issuing any Read/Write command.
     //esp_rom_delay_us(120);
-    delay(1000);
 
-    Serial.println("[AUTH] Port open — starting Read loop");
+//    Serial.println("[AUTH] Port open — starting Read loop");
 
     // --- Build READ FAULT_STATUS frame (12-bit read request, static) ---
-    const uint8_t  rd_addr  = 0x20;   // FAULT_STATUS register
+//    const uint8_t  rd_addr  = 0x20;   // FAULT_STATUS register
 //    const uint8_t  rd_crc   = crc3_read_request(rd_addr);
-    const uint8_t  rd_crc   = crc3;
-    const uint64_t rd_frame = ((uint64_t)1       << 9) |
-                               ((uint64_t)rd_addr << 3) |
-                               ((uint64_t)rd_crc);
+//    const uint64_t rd_frame = ((uint64_t)1       << 9) |
+//                               ((uint64_t)rd_addr << 3) |
+//                               ((uint64_t)rd_crc);
 
-    Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", rd_frame, rd_crc);
+//    Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", rd_frame, rd_crc);
+
+                        uint8_t  TX_CRC = 0;
+                        uint8_t  RX_CRC = 0; 
+                        bool  ACC_INC = false;
 
     for (;;) {
+//--------------------------------------------------------------------------------------------------------------        
+                        // Enable 3.3V power supply 
+                        digitalWrite(Config::PwrEn, LOW);
+                        delay(20); // delay to stabilize 3.3V power rail
 
-        manchester_tx_send(rd_frame, 12, /*start_mark=*/true, /*end_mark=*/false);
+                        // --- Access Code (opens device serial port, mandatory after every power cycle) ---
+                        // 44-bit write frame: SYNC=00 | R/W=0 | ADDR=0x31 | DATA=0x2C413736 | CRC[3]
+                        const uint32_t kAccessData = 0x2C413737UL;
+                        const uint8_t  kAccessAddr = 0x31;
+
+                        if(ACC_INC) {
+                            ACC_INC = false;
+                            TX_CRC++;
+                            if (TX_CRC > 7) {TX_CRC = 0;}
+                        }
+
+                        const uint8_t  ac_crc      = TX_CRC;
+                        const uint64_t ac_frame    = ((uint64_t)kAccessAddr  << 35) |
+                                                         ((uint64_t)kAccessData  <<  3) |
+                                                         ((uint64_t)ac_crc);
+
+
+                        Serial.printf("[AUTH] Sending Access Code  frame=0x%011llX  CRC=%d\n", ac_frame, ac_crc);
+                        manchester_tx_send(ac_frame, 44, /*start_mark=*/true, /*end_mark=*/true);
+                        esp_rom_delay_us(120);
+
+
+                        // --- Build READ FAULT_STATUS frame (12-bit read request, static) ---
+                        const uint8_t  rd_addr  = 0x20;   // FAULT_STATUS register
+                        const uint8_t  rd_crc = RX_CRC;
+                        const uint64_t rd_frame = ((uint64_t)1       << 9) |
+                                                    ((uint64_t)rd_addr << 3) |
+                                                    ((uint64_t)rd_crc);
+
+                        Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", rd_frame, rd_crc);
+                        manchester_tx_send(rd_frame, 12, /*start_mark=*/true, /*end_mark=*/false);
+
+                        RX_CRC++;
+                        if(RX_CRC > 7) {
+                            RX_CRC = 0;
+                            ACC_INC = true;
+                        }
+
+                        // Wait for respond from device
+                        delay(20);
+
+                        // Disable 3.3V power supply 
+                        digitalWrite(Config::PwrEn, HIGH); // turn of 3.3V LDO
+                        //delay(1000); //delay to set 3.3V rail to 0
+//--------------------------------------------------------------------------------------------------------------                    
+//        manchester_tx_send(rd_frame, 12, /*start_mark=*/true, /*end_mark=*/false);
 
         // Device responds within 74 µs; arm RMT RX and wait up to 100 ms.
         // Response frame: SYNC[2] | R/W[1] | ADDR[6] | DATA[32] | CRC[3] = 44 bits

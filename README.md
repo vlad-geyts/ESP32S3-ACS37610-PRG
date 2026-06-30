@@ -536,3 +536,38 @@ A few notes:
   - The PySide6 download is fairly large (~150–200 MB because it includes Qt). One-time.
   
 Want me to run steps 2 and 3 for you (create the host\.venv and install the packages)? I'll leave step 1 (installing Python) to you to run first, since it's a system-wide install — tell me once py --version works and I'll take it from there.
+
+
+`All set. Steps 2 and 3 are done and verified.`
+
+**What I did**
+
+  - *Created the venv* at `host\.venv\` using Python 3.14.6.
+  - *Installed the packages* into it:
+
+    *Package*	  *Version*	    *Notes*
+    PySide6	      6.11.1	    Qt runtime 6.11.1 bundled — `cp310-abi3`
+                              stable-ABI wheel, which is why it installed cleanly on the very new Python 3.14
+    pyserial	    3.5	        Already enumerates your COM ports (COM3/5/6) from inside the venv
+    pytest	      9.1.1	      For the host unit tests
+
+  - *Added* `host/requirements.txt` (pinned versions) so the environment is reproducible.
+
+
+**How to use it day-to-day**
+
+Two ways to run Python in the environment:
+
+  **OPTION A**
+            call the venv Python directly (no activation, what I used above)
+            `host\.venv\Scripts\python.exe your_script.py`
+  
+  **OPTIOn B**
+             "activate" the venv for a terminal session
+            `host\.venv\Scripts\Activate.ps1`     # prompt shows (.venv); then just use `python`
+
+  (If Option B errors with "running scripts is disabled," run once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.)
+
+  *In VS Code*: install the Python extension (Microsoft), then use the command palette → Python: Select Interpreter → pick `host\.venv\Scripts\python.exe`. After that, the Run/Debug button and integrated terminal use this environment automatically.
+
+You now have everything needed to start building the GUI — no Visual Studio, no Qt SDK. The logical first coding step from the plan is G1 (the firmware command parser), since the GUI can't be exercised until the ESP32 speaks the §3 protocol. Want me to scaffold the host/acs_gui/ package structure, or start on the firmware side?

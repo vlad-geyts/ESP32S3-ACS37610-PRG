@@ -1,0 +1,10 @@
+# ACS37610 Programmer — host GUI dependencies
+# Install into a venv:  py -m venv host\.venv
+#                       host\.venv\Scripts\python.exe -m pip install -r host\requirements.txt
+#
+# Pinned to the versions validated on Python 3.14 (PySide6 ships an abi3 wheel,
+# so it works on 3.10+ including 3.14).
+
+PySide6==6.11.1      # Qt GUI framework (bundles Qt runtime — no separate Qt SDK)
+pyserial==3.5        # serial COM port access to the ESP32 programmer
+pytest==9.1.1        # host-side unit tests (codec round-trips, mock-serial protocol)

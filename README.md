@@ -571,3 +571,114 @@ Two ways to run Python in the environment:
   *In VS Code*: install the Python extension (Microsoft), then use the command palette → Python: Select Interpreter → pick `host\.venv\Scripts\python.exe`. After that, the Run/Debug button and integrated terminal use this environment automatically.
 
 You now have everything needed to start building the GUI — no Visual Studio, no Qt SDK. The logical first coding step from the plan is G1 (the firmware command parser), since the GUI can't be exercised until the ESP32 speaks the §3 protocol. Want me to scaffold the host/acs_gui/ package structure, or start on the firmware side?
+
+`BY ME I'll be working on this project from 2 computers (home and office). What is the best approch to hadle project files transfer berween 2 PCs with exclusion host.,venv/. etc from commitment to GitHub?`
+
+Git + GitHub is the right tool for this — it's exactly what it's for, and the rule is simple: `commit the recipe, not the cooked result`. You already have the recipe files `(requirements.txt`, `platformio.ini`); the environments (`host/.venv/, .pio/`) get rebuilt on each PC. Let me check your current git/remote state so I give you the exact next steps rather than generic ones.
+
+Good news: **you're already 90% set up**. Your repo is on GitHub and the exclusions are already working — nothing to redesign. Here's the full picture and the workflow.
+
+**What I found**
+  - *GitHub remote already configured*: origin → https://github.com/vlad-geyts/ESP32S3-ACS37610-PRG.git
+  - `main` is in sync with `origin/main`, working tree clean — your latest commit ("installed Python and all packages") is committed.
+  - 8Exclusions are working:* under `host/`, only `host/requirements.txt` is tracked. `host/.venv/` is correctly not in git. ✅
+
+  # The approach: Git is the transfer mechanism
+  The principle for both the Python venv and the PlatformIO build: *commit the recipe, rebuild the result on each PC*.
+
+
+    **Don't sync (per-machine, rebuilt)**     	        **Commit instead (the recipe)**
+    `host/.venv/` (~250 MB, OS-specific binaries)	      `host/requirements.txt` ✅
+    `.pio/` (toolchain + libs)                          `platformio.ini` ✅
+    `__pycache__/, .pytest_cache/`	
+                        — (build artifacts)
+    All of these are already in your .gitignore.
+
+
+  # Daily workflow (do this on both PCs)
+
+  git pull                              # FIRST thing when you sit down
+  ... work ...
+  git add -A
+  git commit -m "describe the change"
+  git push                              # LAST thing before you leave
+
+
+  *The one rule that prevents 95% of two-PC pain:* always `push` before you leave a machine, always `pull` before you start on the other. Stranded uncommitted work on the home PC is the classic Monday-morning headache.
+
+
+  # One-time setup on the SECOND PC (e.g. the office machine)
+
+  git clone https://github.com/vlad-geyts/ESP32S3-ACS37610-PRG.git
+  cd ESP32S3-ACS37610-PRG
+
+  # rebuild the Python environment from the committed recipe:
+  py -m venv host\.venv
+  host\.venv\Scripts\python.exe -m pip install -r host\requirements.txt
+
+
+  PlatformIO rebuilds `.pio/` automatically the first time you hit Build. Install the same Python (3.14) there so the pinned `requirements.txt` matches exactly.
+
+
+# Two important warnings
+
+  1. *Do NOT put the project folder in OneDrive / Dropbox / Google Drive and let that sync it*. File-sync tools corrupt the `.git` folder and race with the build directories (`.pio, .venv`). Git is the sync tool — don't double-sync. Your project lives at `c:\Data\PlatformIO\...` (outside OneDrive), which is correct — keep it there.
+  2. *If you ever forget to pull and commit on both PCs*, your `push` gets rejected (non-fast-forward). Just `git pull` to merge, then push. Optional, to keep history tidy: `git config --global pull.rebase true`.
+
+
+ # Two small fixes worth doing (optional — I can do them now)
+  - `git` *isn't on this terminal's PATH* (it's installed per-user at `%LOCALAPPDATA%\Programs\Git`). VS Code's    Source Control panel works, but for `git` in the integrated terminal you'd want `%LOCALAPPDATA%\Programs\Git\cmd` on your PATH. Easiest portable fix: add a `.vscode` terminal setting, or add it to your user PATH on each PC.
+  - *Add a* `.gitattributes` with `* text=auto eol=lf` for consistent line endings across the two machines (cheap insurance, especially once there are many Python files).
+
+  Want me to add the `.gitattributes` and set up git on PATH for this terminal? 
+
+  `BY ME` Yes
+
+  Both done. Here's the summary:
+
+✅ **What I set up**
+
+1. `.gitattributes` — created and committed (`08fcf41`). It enforces LF line endings repo-wide (with CRLF kept for `.bat/.cmd`, and binary markers for PDFs/images/etc.). Renormalization caused *zero churn* — your files were already LF, so this is purely preventive going forward.
+
+2. Git on PATH — added `C:\Users\vgeyts\AppData\Local\Programs\Git\cmd` to your persistent user PATH.
+
+⚠️ It only takes effect in newly opened terminals — this session and any already-open terminal won't see it. Open a fresh terminal and run `git --version` to confirm.
+
+
+# One thing left: the commit isn't pushed yet
+
+Your branch is now `ahead 1` — the `.gitattributes` commit is local only. To sync it to GitHub (and have it on your office PC):
+
+`git push`
+
+Want me to push it for me, or will you do it? (It's a clean, single-file commit — safe either way.)
+
+
+# Notes for the second PC
+  - The PATH fix is *per-machine* — you'll need to do the same on the office PC (or just re-run the Git installer there with the "Add to PATH" option ticked). Git's installer normally does this automatically; it just didn't get applied on this one.
+  - Once you `git pull` on the office PC, `.gitattributes` arrives automatically, so both machines stay line-ending-consistent with no further setup.
+
+  `BY ME: I've 'git push' using Git Bash terminal as usually. Let me some time install in VS Code the Python extention and reproduce the same set up my home PC. After that I'll let to scaffold the host/acs_gui/ package structure.`
+
+  *Sounds good* — push confirmed on your end, so `origin/main` now has everything (GUI plan, `requirements.txt,` .`gitignore`,` .gitattributes`).
+
+Here's a compact checklist for bringing *the other PC* up to the same state, so it's smooth when you get there:
+
+# 1. Get the latest
+git pull                       # (or clone, if it's not on that PC yet)
+
+# 2. Rebuild the Python env from the committed recipe (.venv is NOT synced)
+py -m venv host/.venv
+host/.venv/Scripts/python.exe -m pip install -r host/requirements.txt
+
+
+
+**Then in VS Code:**
+
+1. Install the *Python* extension (Microsoft) — it pulls in Pylance automatically.
+2. `Ctrl+Shift+P` → *Python: Select Interpreter* → pick `host\.venv\Scripts\python.exe`. After that the Run button and integrated terminal use the venv automatically.
+3. Install the same *Python 3.14* there so the pinned `requirements.txt` matches exactly.
+
+host/.venv/Scripts/python.exe -c "import PySide6.QtCore as C, serial, pytest; print(C.__version__)"
+
+I'll hold off on scaffolding `host/acs_gui/` until you give the word. When you're ready, just say so — I'll build out the package structure (`transport.py`, `protocol.py`, `registers.py`, `widgets/,` `views/,` etc.) per §5 of the plan. 👍

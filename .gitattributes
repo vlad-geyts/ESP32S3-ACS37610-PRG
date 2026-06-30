@@ -1,0 +1,21 @@
+# Consistent line endings across both PCs (home + office).
+# Git normalizes text files to LF in the repository and checks them out as LF
+# on every machine. The tooling here — VS Code, PlatformIO/gcc, Python — all
+# handle LF fine on Windows, so this removes CRLF/LF churn between the two PCs.
+* text=auto eol=lf
+
+# Windows batch scripts must keep CRLF to run correctly.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Binary files: never apply line-ending conversion.
+*.pdf  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.bin  binary
+*.elf  binary
+*.gz   binary
+*.zip  binary

@@ -679,6 +679,10 @@ host/.venv/Scripts/python.exe -m pip install -r host/requirements.txt
 2. `Ctrl+Shift+P` → *Python: Select Interpreter* → pick `host\.venv\Scripts\python.exe`. After that the Run button and integrated terminal use the venv automatically.
 3. Install the same *Python 3.14* there so the pinned `requirements.txt` matches exactly.
 
+
+# Quick sanity check on that PC (should print versions, no errors)
 host/.venv/Scripts/python.exe -c "import PySide6.QtCore as C, serial, pytest; print(C.__version__)"
+
+
 
 I'll hold off on scaffolding `host/acs_gui/` until you give the word. When you're ready, just say so — I'll build out the package structure (`transport.py`, `protocol.py`, `registers.py`, `widgets/,` `views/,` etc.) per §5 of the plan. 👍

@@ -44,11 +44,11 @@ void setup() {
     ws2812.begin();
 
     // Manchester TX (bit-bang) and RX (RMT_CHANNEL_1) — 30 kbps, T=33 µs
-    //manchester_tx_init(33);
-    //manchester_rx_init(33);
+    manchester_tx_init(33);
+    manchester_rx_init(33);
 
-    manchester_tx_init(100);
-    manchester_rx_init(100);
+    //manchester_tx_init(100);
+    //manchester_rx_init(100);
 
     // Enable 3.3V power supply 
     digitalWrite(Config::PwrEn, LOW);

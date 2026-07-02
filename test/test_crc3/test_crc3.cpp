@@ -7,25 +7,27 @@ void tearDown() {}
 // --- Read request vectors (R/W=1, ADDR=xx, 7 bits) ---
 
 void test_read_fault_status() {
-    // R/W=1, ADDR=0x20 (FAULT_STATUS) → 0b1100000 → CRC=5
-    TEST_ASSERT_EQUAL_UINT8(5, crc3_read_request(0x20));
+    // R/W=1, ADDR=0x20 (FAULT_STATUS) → 0b1100000 → CRC=1
+    // Hardware-verified: device accepted frame and responded.
+    TEST_ASSERT_EQUAL_UINT8(1, crc3_read_request(0x20));
 }
 
 void test_read_ee_cust0() {
-    // R/W=1, ADDR=0x09 (EE_CUST0) → 0b1001001 → CRC=0
-    TEST_ASSERT_EQUAL_UINT8(0, crc3_read_request(0x09));
+    // R/W=1, ADDR=0x09 (EE_CUST0) → 0b1001001 → CRC=5
+    TEST_ASSERT_EQUAL_UINT8(5, crc3_read_request(0x09));
 }
 
 void test_read_ee_cust1() {
-    // R/W=1, ADDR=0x0A (EE_CUST1) → 0b1001010 → CRC=3
-    TEST_ASSERT_EQUAL_UINT8(3, crc3_read_request(0x0A));
+    // R/W=1, ADDR=0x0A (EE_CUST1) → 0b1001010 → CRC=0
+    TEST_ASSERT_EQUAL_UINT8(0, crc3_read_request(0x0A));
 }
 
 // --- Write command vector (R/W=0, ADDR, DATA, 39 bits) ---
 
 void test_write_auth() {
-    // AUTH: R/W=0, ADDR=0x31, DATA=0x2C413736 → CRC=2
-    TEST_ASSERT_EQUAL_UINT8(2, crc3_write(0, 0x31, 0x2C413736));
+    // AUTH: R/W=0, ADDR=0x31, DATA=0x2C413736 → CRC=5
+    // Hardware-verified: device accepted frame and opened serial port.
+    TEST_ASSERT_EQUAL_UINT8(5, crc3_write(0, 0x31, 0x2C413736));
 }
 
 // --- Structural invariants ---

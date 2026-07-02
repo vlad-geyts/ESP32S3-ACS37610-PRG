@@ -1,20 +1,22 @@
 #include "crc3.h"
 
-// Shift-register CRC-3: polynomial 0b1011, init 0b111, MSB first.
-// A 4-bit working register is used so the overflow bit is handled implicitly —
-// when bit 3 is set after shifting in a new bit, XOR with the full divisor
-// clears bit 3 and applies the polynomial to bits [2:0].
+// Standard feedback shift-register CRC-3: polynomial x³+x+1, init 0b111, MSB first.
+// For each input bit, feedback = MSB(crc) XOR input_bit. The register is shifted
+// left and XORed with the lower polynomial bits (0b011) only when feedback is 1.
+// This is the correct GF(2) long-division formulation; the previous version
+// incorrectly ORed the input bit directly into the register (gave wrong results).
 uint8_t crc3_calc(uint64_t bits, int bitCount) {
-    const uint8_t poly = 0b1011;
-    uint8_t crc = 0b111;
+    const uint8_t poly = 0b011;   // lower bits of x³+x+1 (leading x³ term is implicit)
+    uint8_t crc = 0b111;          // init = all ones
     for (int i = bitCount - 1; i >= 0; --i) {
-        uint8_t bit = (bits >> i) & 1u;
-        crc = ((crc << 1) | bit) & 0xF;
-        if (crc & 0x8) {
+        const uint8_t bit      = (bits >> i) & 1u;
+        const uint8_t feedback = ((crc >> 2) & 1u) ^ bit;  // MSB(crc) XOR input
+        crc = (crc << 1) & 0b111u;                          // shift out MSB
+        if (feedback) {
             crc ^= poly;
         }
     }
-    return crc & 0x7;
+    return crc;
 }
 
 // Write command: R/W[1] + ADDR[6] + DATA[32] = 39 bits

@@ -7,7 +7,8 @@
 
 static constexpr gpio_num_t    kProgGpio   = GPIO_NUM_4;
 static constexpr gpio_num_t    kStrobGpio  = GPIO_NUM_21;
-static constexpr rmt_channel_t kRxChannel  = RMT_CHANNEL_1;
+// On ESP32-S3, RMT channels 0–3 are TX-only; RX requires channel 4–7.
+static constexpr rmt_channel_t kRxChannel  = RMT_CHANNEL_4;
 static constexpr uint32_t      kRmtClkMhz  = 10u;   // 80 MHz / clk_div=8
 static constexpr uint32_t      kMarkUs     = 74u;   // start/end mark pulse width (µs)
 

@@ -115,12 +115,13 @@ void programmerTask(void *pvParameters) {
     for (;;) {
 
         Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", rd_frame, rd_crc);
-        manchester_tx_send(rd_frame, 12, /*start_mark=*/false, /*end_mark=*/false);
+        // arm_rx=true: RMT is armed inside TX just before PROG is released,
+        // so capture starts before the device has a chance to respond.
+        manchester_tx_send(rd_frame, 12, /*start_mark=*/false, /*end_mark=*/false, /*arm_rx=*/true);
 
-        // Device responds within 74 µs; arm RMT RX and wait up to 100 ms.
         // Response frame: SYNC[2] | R/W[1] | ADDR[6] | DATA[32] | CRC[3] = 44 bits
         uint64_t response = 0;
-        const uint8_t rx_bits = manchester_rx_receive(&response, 100);
+        const uint8_t rx_bits = manchester_rx_receive(&response, 200);
 
         if (rx_bits == 44) {
             const uint8_t  rx_sync = (uint8_t)((response >> 42) & 0x3);
@@ -130,8 +131,11 @@ void programmerTask(void *pvParameters) {
             const uint8_t  rx_crc  = (uint8_t)(response & 0x7);
             Serial.printf("[RX]  SYNC=%d R/W=%d ADDR=0x%02X DATA=0x%08X CRC=%d\n",
                           rx_sync, rx_rw, rx_addr, rx_data, rx_crc);
+        } else if (rx_bits == 0) {
+            Serial.println("[RX]  timeout — no data (device not responding?)");
         } else {
-            Serial.printf("[RX]  timeout or decode error (%d bits)\n", rx_bits);
+            Serial.printf("[RX]  decode error: got %d bits (expected 44)  raw=0x%011llX\n",
+                          rx_bits, response);
         }
 
         vTaskDelay(pdMS_TO_TICKS(2000));

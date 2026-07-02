@@ -18,6 +18,10 @@ static uint32_t        s_half_us       = 0;
 // RX state
 static uint32_t        s_rx_half_ticks = 0;   // T/2 expressed in 10 MHz RMT ticks
 static RingbufHandle_t s_rx_rb         = nullptr;
+// Set true by manchester_tx_send(arm_rx=true); cleared after each collect.
+// Prevents manchester_rx_receive() from re-arming (and losing captured data)
+// when the caller already armed via TX.
+static bool            s_rx_armed      = false;
 
 void manchester_tx_init(uint32_t bit_period_us) {
     s_half_us = bit_period_us / 2u;   // 33 / 2 = 16 µs → T ≈ 32 µs (31.25 kbps)
@@ -46,7 +50,8 @@ void manchester_tx_init(uint32_t bit_period_us) {
     gpio_set_level(kStrobGpio, 0);
 }
 
-void manchester_tx_send(uint64_t bits, uint8_t bit_count, bool start_mark, bool end_mark) {
+void manchester_tx_send(uint64_t bits, uint8_t bit_count,
+                        bool start_mark, bool end_mark, bool arm_rx) {
     gpio_set_level(kStrobGpio, 1);   // scope trigger: frame start
 
     if (start_mark) {
@@ -70,12 +75,20 @@ void manchester_tx_send(uint64_t bits, uint8_t bit_count, bool start_mark, bool 
         esp_rom_delay_us(kMarkUs);   // 74 µs LOW mark after last bit
     }
 
-    gpio_set_level(kProgGpio, 1);    // release line: PROG returns to idle HIGH
+    // Release line first, then arm RMT. PROG rises through the ~1.2 V digital
+    // threshold within ~0.5 µs (10 kΩ pull-up, typical PCB cap). By the time
+    // rmt_rx_start() executes the device hasn't had time to respond, so the RMT
+    // starts from a clean idle-HIGH state and captures the device's very first edge.
+    gpio_set_level(kProgGpio, 1);    // release: PROG returns to idle HIGH
+    if (arm_rx && s_rx_rb) {
+        rmt_rx_start(kRxChannel, true);  // arm while PROG is idle HIGH
+        s_rx_armed = true;
+    }
     gpio_set_level(kStrobGpio, 0);   // scope trigger: frame end
 }
 
 // ---------------------------------------------------------------------------
-// RX — RMT_CHANNEL_1 Manchester decoder
+// RX — RMT_CHANNEL_4 Manchester decoder
 // ---------------------------------------------------------------------------
 
 // Expand RMT items to a half-period stream, stripping device start/end marks,
@@ -86,15 +99,23 @@ void manchester_tx_send(uint64_t bits, uint8_t bit_count, bool start_mark, bool 
 //
 // The leading mark merges with the first Manchester half-period in the RMT
 // capture (both are LOW and contiguous). The algorithm detects any LOW pulse
-// that is longer than (mark_ticks - half_ticks/2) as a mark-containing pulse,
-// strips the mark portion, and emits only the remaining half-period (if any).
-// This correctly handles both the leading merge case and the trailing case
-// where the mark may or may not merge with the last bit's half-period.
+// that is longer than mark_thresh as a mark-containing pulse, strips the mark
+// portion, and emits only the remaining half-period (if any). This correctly
+// handles both the leading merge case and the trailing case where the mark may
+// or may not merge with the last bit's half-period.
+//
+// Mark detection is ONLY enabled when mark_ticks > 2×half_ticks (i.e. T < 74 µs,
+// production speed). At debug speed (T=100 µs, mark=74 µs < T), the mark
+// overlaps the double-half-period range so detection is ambiguous and disabled.
 static uint8_t decode_rmt(const rmt_item32_t *items, size_t count,
                            uint32_t half_ticks, uint64_t *out) {
     const uint32_t thresh      = half_ticks + half_ticks / 2u;    // 1.5 × T/2: single vs double half-period
     const uint32_t mark_ticks  = kMarkUs * kRmtClkMhz;            // 74 µs in RMT ticks (740 at 10 MHz)
-    const uint32_t mark_thresh = mark_ticks - half_ticks / 2u;    // min ticks to flag as mark-containing
+    // Only apply mark detection when the mark is clearly longer than a full bit (T).
+    // At T=33 µs: mark(740) > 2×half(160)=320 → enable.
+    // At T=100 µs: mark(740) < 2×half(500)=1000 → disable to avoid stripping real data.
+    const bool     marks_enabled = (mark_ticks > 2u * half_ticks);
+    const uint32_t mark_thresh   = marks_enabled ? (mark_ticks - half_ticks / 2u) : UINT32_MAX;
 
     uint8_t halves[90];   // max 44 bits × 2 = 88 half-periods
     uint8_t n = 0;
@@ -149,7 +170,12 @@ void manchester_rx_init(uint32_t bit_period_us) {
     cfg.mem_block_num = 2u;          // 128 items; 44-bit frame needs ≤ 44 items
     cfg.rx_config.filter_en           = true;
     cfg.rx_config.filter_ticks_thresh = 40u;   // 4 µs glitch filter
-    cfg.rx_config.idle_threshold      = 500u;  // 50 µs idle → end of frame
+    // idle_threshold must be > T (max consecutive HIGH in Manchester = one full bit period)
+    // so it doesn't fire mid-frame on a double-half-period HIGH boundary (e.g. 0→1 bit pair).
+    // Using 3×T guarantees this at any speed: at T=33 µs → 990 ticks (99 µs);
+    //                                          at T=100 µs → 3000 ticks (300 µs).
+    // The device responds within a few µs of PROG going HIGH (well under 3×T).
+    cfg.rx_config.idle_threshold = (uint16_t)(s_rx_half_ticks * 6u); // = 3×T
 
     rmt_config(&cfg);
     rmt_driver_install(kRxChannel, 512u, 0);
@@ -173,8 +199,12 @@ void manchester_rx_init(uint32_t bit_period_us) {
 uint8_t manchester_rx_receive(uint64_t *out_bits, uint32_t timeout_ms) {
     if (!s_rx_rb) return 0u;
 
-    // Arm capture. Device turnaround is ~74 µs so RMT is ready well before response.
-    rmt_rx_start(kRxChannel, true);  // true = clear RMT memory
+    // If caller already armed via manchester_tx_send(arm_rx=true), skip re-arming —
+    // the device may already be responding and re-arming would clear captured data.
+    if (!s_rx_armed) {
+        rmt_rx_start(kRxChannel, true);  // arm if not done by TX path
+    }
+    s_rx_armed = false;
 
     size_t rx_size = 0;
     auto *items = static_cast<rmt_item32_t *>(

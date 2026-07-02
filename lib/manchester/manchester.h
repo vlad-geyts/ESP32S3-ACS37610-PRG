@@ -8,7 +8,7 @@
 //   0 → LOW(T/2)  then HIGH(T/2)   (rising edge at mid-point)
 //   1 → HIGH(T/2) then LOW(T/2)    (falling edge at mid-point)
 //
-// RX: RMT_CHANNEL_1 captures transitions; idle_threshold detects end-of-frame.
+// RX: RMT_CHANNEL_4 captures transitions; idle_threshold detects end-of-frame.
 //
 // GPIO21 (STROB_OUT) is toggled HIGH for the duration of each TX frame.
 
@@ -22,11 +22,15 @@ void manchester_tx_init(uint32_t bit_period_us = 33);
 // start_mark: pull PROG LOW for 74 µs before the first bit (required by ACS37610).
 // end_mark:   pull PROG LOW for 74 µs after the last bit (Write commands only;
 //             omit for Read — PROG must be released to High-Z so device can respond).
+// arm_rx:     arm RMT RX capture immediately before releasing the PROG line.
+//             Use for Read commands so capture is live the instant the device responds.
+//             Do NOT call manchester_rx_receive() before this — it will arm RX itself.
 void manchester_tx_send(uint64_t bits, uint8_t bit_count,
-                        bool start_mark = false, bool end_mark = false);
+                        bool start_mark = false, bool end_mark = false,
+                        bool arm_rx = false);
 
 // Initialise Manchester RX. Call once from setup(), after manchester_tx_init().
-// Configures RMT_CHANNEL_1 on GPIO4 and re-applies INPUT_OUTPUT_OD so TX still works.
+// Configures RMT_CHANNEL_4 on GPIO4 and re-applies INPUT_OUTPUT_OD so TX still works.
 void manchester_rx_init(uint32_t bit_period_us = 33);
 
 // Receive one Manchester frame. Call immediately after manchester_tx_send() returns.

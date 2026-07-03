@@ -686,3 +686,187 @@ host/.venv/Scripts/python.exe -c "import PySide6.QtCore as C, serial, pytest; pr
 
 
 I'll hold off on scaffolding `host/acs_gui/` until you give the word. When you're ready, just say so — I'll build out the package structure (`transport.py`, `protocol.py`, `registers.py`, `widgets/,` `views/,` etc.) per §5 of the plan. 👍
+
+
+# This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Summary:
+1. Primary Request and Intent:
+   The user is building an ESP32-S3-DEVKITC-1N16R8V programmer for the ACS37610LLUATR-010B3 hall-effect current sensor IC. The PROG pin uses a bidirectional Manchester-encoded (G.E. Thomas convention) open-drain serial protocol at 30 kbps (T=33µs). The session covered: implementing RMT Manchester RX decoder, fixing the protocol sequence (Access Code → Read/Write), discovering and fixing start/end mark requirements, fixing a CRC algorithm bug, and resolving an RMT channel assignment error on ESP32-S3. The current issue is that RMT RX captures nothing (timeout/0 bits) even though the device is responding.
+
+   2. Key Technical Concepts:
+   - Manchester encoding (G.E. Thomas convention), MSB first, T=33µs production / T=100µs debug
+   - ESP32-S3 RMT peripheral: channels 0–3 are TX-only, channels 4–7 are RX-only (critical difference from original ESP32)
+   - RMT RX: idle_threshold (500 ticks = 50µs at 10 MHz) detects end-of-frame; filter (40 ticks = 4µs) removes glitches
+   - GPIO4 as INPUT_OUTPUT_OD (open-drain); rmt_config() for RX clears OE bit — must re-apply gpio_config() after
+   - CRC-3: polynomial g(x)=x³+x+1, init=0b111, MSB first — correct algorithm uses feedback = MSB(crc) XOR input_bit
+   - ACS37610 protocol: Access Code must be sent first (opens serial port); 74µs LOW marks optional; 90-120µs settle after Access Code; 44-bit response frame
+   - PlatformIO: lib/ pattern for shared modules; `[env:native]` for CRC unit tests via MinGW
+
+3. Files and Code Sections:
+
+   - `lib/manchester/manchester.h` — TX/RX driver declarations
+     ```cpp
+     void manchester_tx_init(uint32_t bit_period_us = 33);
+     void manchester_tx_send(uint64_t bits, uint8_t bit_count,
+                             bool start_mark = false, bool end_mark = false);
+     void manchester_rx_init(uint32_t bit_period_us = 33);
+     uint8_t manchester_rx_receive(uint64_t *out_bits, uint32_t timeout_ms = 100);
+     ```
+
+   - `lib/manchester/manchester.cpp` — Full TX/RX implementation
+     Key constants:
+     ```cpp
+     static constexpr gpio_num_t    kProgGpio   = GPIO_NUM_4;
+     static constexpr gpio_num_t    kStrobGpio  = GPIO_NUM_21;
+     // On ESP32-S3, RMT channels 0–3 are TX-only; RX requires channel 4–7.
+     static constexpr rmt_channel_t kRxChannel  = RMT_CHANNEL_4;
+     static constexpr uint32_t      kRmtClkMhz  = 10u;
+     static constexpr uint32_t      kMarkUs     = 74u;
+     ```
+
+     TX send with marks:
+     ```cpp
+     void manchester_tx_send(uint64_t bits, uint8_t bit_count, bool start_mark, bool end_mark) {
+         gpio_set_level(kStrobGpio, 1);
+         if (start_mark) { gpio_set_level(kProgGpio, 0); esp_rom_delay_us(kMarkUs); }
+         for (uint8_t i = 0; i < bit_count; ++i) {
+             const uint8_t b = (bits >> (bit_count - 1u - i)) & 1u;
+             gpio_set_level(kProgGpio, b ? 1u : 0u); esp_rom_delay_us(s_half_us);
+             gpio_set_level(kProgGpio, b ? 0u : 1u); esp_rom_delay_us(s_half_us);
+         }
+         if (end_mark) { gpio_set_level(kProgGpio, 0); esp_rom_delay_us(kMarkUs); }
+         gpio_set_level(kProgGpio, 1);
+         gpio_set_level(kStrobGpio, 0);
+     }
+     ```
+
+
+     RX init (after rmt_config clears OE, re-apply INPUT_OUTPUT_OD):
+     ```cpp
+     void manchester_rx_init(uint32_t bit_period_us) {
+         s_rx_half_ticks = (bit_period_us / 2u) * kRmtClkMhz;
+         rmt_config_t cfg = {};
+         cfg.rmt_mode = RMT_MODE_RX; cfg.channel = kRxChannel;
+         cfg.gpio_num = kProgGpio; cfg.clk_div = 8u; cfg.mem_block_num = 2u;
+         cfg.rx_config.filter_en = true;
+         cfg.rx_config.filter_ticks_thresh = 40u;  // 4 µs
+         cfg.rx_config.idle_threshold = 500u;       // 50 µs
+         rmt_config(&cfg);
+         rmt_driver_install(kRxChannel, 512u, 0);
+         rmt_get_ringbuf_handle(kRxChannel, &s_rx_rb);
+         // Re-apply INPUT_OUTPUT_OD — rmt_config() cleared OE bit
+         gpio_config_t io = {}; io.pin_bit_mask = (1ULL << kProgGpio);
+         io.mode = GPIO_MODE_INPUT_OUTPUT_OD;
+         io.pull_up_en = GPIO_PULLUP_DISABLE; io.pull_down_en = GPIO_PULLDOWN_DISABLE;
+         io.intr_type = GPIO_INTR_DISABLE; gpio_config(&io);
+         rtc_gpio_pulldown_dis(kProgGpio); rtc_gpio_pullup_dis(kProgGpio);
+     }
+     ```
+
+     decode_rmt: strips 74µs LOW marks from device response (mark merged with first half-period):
+     ```cpp
+     static uint8_t decode_rmt(const rmt_item32_t *items, size_t count,
+                                uint32_t half_ticks, uint64_t *out) {
+         const uint32_t thresh      = half_ticks + half_ticks / 2u;
+         const uint32_t mark_ticks  = kMarkUs * kRmtClkMhz;          // 740 ticks
+         const uint32_t mark_thresh = mark_ticks - half_ticks / 2u;  // detect merged marks
+         // ... strips mark pulses, emits merged half-period if remainder >= half_ticks/2
+     }
+     ```
+
+  - `lib/crc3/crc3.cpp` — CRC-3 engine (was buggy, now fixed)
+     **Wrong (old) algorithm:**
+     ```cpp
+     crc = ((crc << 1) | bit) & 0xF;  // incorrectly ORs bit into register
+     if (crc & 0x8) crc ^= 0b1011;
+     ```
+     **Correct (new) algorithm:**
+     ```cpp
+     const uint8_t poly = 0b011;
+     const uint8_t feedback = ((crc >> 2) & 1u) ^ bit;  // MSB(crc) XOR input
+     crc = (crc << 1) & 0b111u;
+     if (feedback) crc ^= poly;
+     ```
+
+   - `test/test_crc3/test_crc3.cpp` — Unit tests, all corrected to hardware-verified vectors:
+     ```cpp
+     TEST_ASSERT_EQUAL_UINT8(1, crc3_read_request(0x20));  // was 5
+     TEST_ASSERT_EQUAL_UINT8(5, crc3_read_request(0x09));  // was 0
+     TEST_ASSERT_EQUAL_UINT8(0, crc3_read_request(0x0A));  // was 3
+     TEST_ASSERT_EQUAL_UINT8(5, crc3_write(0, 0x31, 0x2C413736));  // was 2
+     ```
+
+     All 6 tests passing via `pio test -e native`.
+
+   - `src/main.cpp` — Current state (user-modified for debugging):
+     ```cpp
+     // T=100µs debug speed
+     manchester_tx_init(100);
+     manchester_rx_init(100);
+     // ...
+     // Power enable inside programmerTask with 3000ms delay
+     digitalWrite(Config::PwrEn, LOW);
+     delay(3000);
+     // Access Code with marks
+     manchester_tx_send(ac_frame, 44, /*start_mark=*/true, /*end_mark=*/true);
+     esp_rom_delay_us(500);
+     // Read loop — marks disabled
+     manchester_tx_send(rd_frame, 12, /*start_mark=*/false, /*end_mark=*/false);
+     // CRC from functions (restored after fix)
+     const uint8_t ac_crc = crc3_write(0, kAccessAddr, kAccessData);  // = 5
+     const uint8_t rd_crc = crc3_read_request(rd_addr);               // = 1
+     ```
+
+      - `Documents/ACS37610_Programmer_Development_Plan_v4.1.md` — Saved as new file; updated §2.2 (90-120µs settle timing), §2.4 (Access Code opens serial port for ALL R/W, not just EEPROM), §4.4 AUTH command description, §4.5 split into 3 sub-sequences.
+
+      4. Errors and Fixes:
+   - **`rmt_config()` clears GPIO output-enable**: Calling `rmt_config()` for RX mode calls `gpio_set_direction(INPUT)` internally, which clears the OE bit and breaks TX bit-bang. Fix: re-apply `gpio_config(INPUT_OUTPUT_OD)` + `rtc_gpio_pulldown_dis()` after `rmt_config()`. The `gpio_matrix_in()` RMT connection is in a separate register and survives.
+   - **Default argument values in header had no effect**: User changed `= 33` to `= 100` in the header but saw no change. Reason: `main.cpp` always passes an explicit value, so header defaults are ignored. Fix: change the argument at the call site in `main.cpp`. Header defaults restored to 33.
+   - **CRC algorithm wrong**: `crc3_calc()` ORed input bit directly into register. Correct algorithm uses MSB(crc) XOR input_bit as feedback. All test vectors were generated by the wrong algorithm and were also wrong. Hardware-verified correct values: read(0x20)=1, write(auth)=5. Fixed both the algorithm and all 4 test vectors.
+   - **RMT channel error on ESP32-S3**: Used `RMT_CHANNEL_1` for RX. On ESP32-S3, channels 0-3 are TX-only, channels 4-7 are RX-only. Fix: changed `kRxChannel = RMT_CHANNEL_1` to `kRxChannel = RMT_CHANNEL_4`.
+   - **Missing start/end marks**: Device not responding because ACS37610 requires 74µs LOW pulse marks. Write commands need start+end mark; Read commands need start mark only (no end mark so PROG stays High-Z for device response). User later found marks are optional in practice.
+   - **[CURRENT] RX timeout (0 bits)**: RMT channel error is gone, CRC is correct, device responds (verified by hardcoded CRC test), but `manchester_rx_receive()` still returns 0. Root cause being investigated.
+
+
+   5. Problem Solving:
+   - CRC fixed and hardware-verified.
+   - RMT channel fixed (ESP32-S3 TX/RX channel split).
+   - **Active problem**: `[RX] timeout or decode error (0 bits)` — RMT channel error gone but no data captured. Most likely cause: `idle_threshold = 500 ticks = 50µs = T/2` at debug speed T=100µs. Any HIGH half-period (exactly 50µs) would hit the idle threshold and terminate capture mid-frame. The idle_threshold must be > T (full bit period) to avoid false termination. It should scale with `bit_period_us`.
+
+   6. All User Messages:
+   - "Continue with the ACS37610 programmer project. TX encoder is done. Ready to implement the RMT Manchester RX decoder — please check memory for context."
+   - "ok, looks good. Save this v4.1 inside Documents folder, and make corresponding changes to the latest code: After reset send the 'Access Code' followed by 'Read Command', which we'll be repeated each 2 sec. So I can validated respond from device."
+   - "There is no respond from device. For debugging purpose I've modified `programmerTask()` I need your help to set bit duration to 100us."
+   - "Do we have redundant `manchester_tx_init()` and `manchester_rx_init()` functions declaration in `manchester.h` file? Initially I've changed argument values from 33 to 100, but it didn't make any effect on bit duration."
+   - "The device is not responding to read command. The root cause is missing what I'd call 'start' and 'end' marks (PROG signal is pulled down by controller for 74us). 1) The Write Access Code command should begin with 'start' mark, followed by 2 sync bits and ended with 'end' marks after sending the last CRC3 bit. After that PROG line should be pulled by controller high. 2) The Read Command should begin with 'start' mark followed by 2 sync bits. No 'end' mark after last CRC3 bit. The PROG line should remain in High Z state. The device will pull PROG line low for 74us and we should start receive data. After data will be transmitted by device it again pulls PROG line low for 74us and releases PROG line to High Z state."
+   - "Hi Claude. We need to revise CRC calculation. By trial and errors I've found that CRC for Access Data=0x2C413736 is 0x5, but result from our code is 0x2. Similar issue with CRC value for Read Command (rd_addr=0x20). Calculated value is 0x5 which is wrong. The correct value is 0x1. By hardcoded both CRC I've got a respond from device (value of EEPROM @ 0x20). During debugging I've made some changes. 1) Removed 'start' & 'end' marks. Looks like they are optional. 2) Bit rate reduced to 10 kbps."
+   - "Do you have access to VS Code terminal window?"
+   - "No RMT errors but this one: [AUTH] Sending Access Code frame=0x1896209B9B5 CRC=5 [AUTH] Port open — starting Read loop [PROG] READ FAULT_STATUS frame=0x301 CRC=1 [RX] timeout or decode error (0 bits)"
+
+   7. Pending Tasks:
+   - Fix `[RX] timeout or decode error (0 bits)` — RMT captures nothing despite device responding. Most likely fix: `idle_threshold` must scale with `bit_period_us` (currently hardcoded 500 ticks = 50µs which equals T/2 at debug speed T=100µs, causing premature frame termination).
+   - Once RX works: validate the decoded 44-bit response fields (SYNC, R/W, ADDR, DATA, CRC) on serial output.
+   - Eventually restore T=33µs production speed and re-validate.
+
+   8. Current Work:
+   The RMT channel error (`RMT CHANNEL ERR`) was fixed by changing `kRxChannel = RMT_CHANNEL_1` to `kRxChannel = RMT_CHANNEL_4` (ESP32-S3 assigns channels 0-3 TX-only, 4-7 RX-only). Build confirmed clean. After flashing, the user reports the RMT errors are gone but still getting `[RX] timeout or decode error (0 bits)`. The device is known to respond (confirmed by hardcoded CRC test). The RMT is armed and the channel is now valid, but `xRingbufferReceive()` times out with no data captured.
+
+   9. Optional Next Step:
+   The user's last message shows: `[RX] timeout or decode error (0 bits)` — RMT initializes without error but captures nothing.
+
+   The most probable cause: `idle_threshold = 500u` (50µs) is hardcoded in `manchester_rx_init()` regardless of `bit_period_us`. At T=100µs (debug speed), T/2 = 50µs = exactly 500 ticks. Any HIGH half-period in the device response triggers the idle threshold and terminates capture after the very first HIGH pulse. The fix is to make idle_threshold scale with the bit period — it should be set to approximately 2×T (two full bit periods) to safely outlast any intra-frame HIGH level while still detecting end-of-frame:
+
+   ```cpp
+   // In manchester_rx_init():
+   cfg.rx_config.idle_threshold = (uint16_t)(bit_period_us * kRmtClkMhz * 2u);
+   // T=33µs → 660 ticks (66µs) — safely > T=32µs, < turnaround 74µs? 
+   // Better: 3×T/2 = 1.5T
+   cfg.rx_config.idle_threshold = (uint16_t)((bit_period_us * kRmtClkMhz * 3u) / 2u);
+   // T=33µs → 495 ticks ≈ 49µs; T=100µs → 1500 ticks = 150µs
+   ```
+
+      Actually the safest value is: larger than T (max Manchester pulse) but smaller than end-of-frame gap. The device's end mark is 74µs LOW then releases to HIGH. After release, PROG = HIGH indefinitely (until next command). So idle_threshold just needs to be > T and < whatever gap is tolerable. A value of `bit_period_us * kRmtClkMhz * 2u` (2×T) works for both speeds: at T=33µs → 660 ticks (66µs), at T=100µs → 2000 ticks (200µs).
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: C:\Users\vgeyts\.claude\projects\c--Data-PlatformIO-ESP32S3-ACS37610-PRG\c0179196-56ee-42d0-8a14-42f4c8f757e0.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.

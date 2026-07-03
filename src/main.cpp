@@ -47,9 +47,6 @@ void setup() {
     manchester_tx_init(33);
     manchester_rx_init(33);
 
-    //manchester_tx_init(100);
-    //manchester_rx_init(100);
-
     // Enable 3.3V power supply 
     digitalWrite(Config::PwrEn, LOW);
     delay(100); // delay to stabilize 3.3V power rail

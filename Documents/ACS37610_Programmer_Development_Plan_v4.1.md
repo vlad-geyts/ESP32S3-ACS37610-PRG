@@ -229,13 +229,20 @@ SYNC[2] | DATA[32] | CRC[3]
 | DATA[31:28] | 4 bits | Not relevant |
 | DATA[27:26] | 2 bits | ECC Pass/Fail status (EEPROM reads only; not relevant for RAM) |
 | DATA[25:0] | 26 bits | Register data payload |
-| CRC | 3 bits | Over SYNC + DATA |
+| CRC | 3 bits | Over DATA[32] only — SYNC excluded (same rule as §2.3a) |
+
+> **Correction (hardware-verified 2026-07-03):** the response CRC covers **DATA[32] only**, consistent with §2.3a. An earlier revision of this table stated "Over SYNC + DATA", which live captures disproved: every received frame (including changing TEMP_OUT data in FAULT_STATUS reads) matches CRC-3(DATA[32]) with init `0b111`.
 
 **Read timing notes:**
 - No special timing or voltage requirements.
 - No additional wait time required; the device responds immediately per protocol.
 - The firmware must switch the GPIO from open-drain output to input **before** the device begins its response frame.
 - On EEPROM reads, firmware shall check DATA[27:26] and report an ECC fault if the pass/fail status indicates an error. No ECC recomputation is required — the device reports the result directly.
+
+**Measured device response behaviour (scope + RMT capture, 2026-07-03, T=33 µs):**
+- The device starts its response **~25 µs** after the controller releases the PROG line (not 74 µs).
+- The response begins with a **short LOW start mark of ~30–50 µs** (shorter than the 74 µs controller mark) which merges with the first data half-period in edge captures — decoders must resolve the alignment structurally, not by duration.
+- **No end mark observed** after the response CRC; the device simply releases the line to High-Z.
 
 ---
 

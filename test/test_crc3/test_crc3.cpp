@@ -30,6 +30,23 @@ void test_write_auth() {
     TEST_ASSERT_EQUAL_UINT8(5, crc3_write(0, 0x31, 0x2C413736));
 }
 
+// --- Device response vectors (DATA[32], 32 bits) ---
+// Hardware-verified 2026-07-03: live device responses, CRC matched on every
+// frame including changing TEMP_OUT data in FAULT_STATUS (0x20). Confirms the
+// response CRC covers DATA[32] only (SYNC excluded).
+
+void test_response_fault_status() {
+    TEST_ASSERT_EQUAL_UINT8(2, crc3_response(0x08780010));  // 0x20, TEMP_OUT=0x878
+    TEST_ASSERT_EQUAL_UINT8(7, crc3_response(0x08800000));  // 0x20, TEMP_OUT=0x880
+    TEST_ASSERT_EQUAL_UINT8(0, crc3_response(0x08810000));  // 0x20, TEMP_OUT=0x881
+    TEST_ASSERT_EQUAL_UINT8(5, crc3_response(0x08830000));  // 0x20, TEMP_OUT=0x883
+}
+
+void test_response_ee_cust() {
+    TEST_ASSERT_EQUAL_UINT8(5, crc3_response(0x002095AE));  // EE_CUST0 (0x09)
+    TEST_ASSERT_EQUAL_UINT8(3, crc3_response(0x0003182E));  // EE_CUST1 (0x0A)
+}
+
 // --- Structural invariants ---
 
 void test_result_fits_3_bits() {
@@ -55,6 +72,8 @@ int main(int argc, char **argv) {
     RUN_TEST(test_read_ee_cust0);
     RUN_TEST(test_read_ee_cust1);
     RUN_TEST(test_write_auth);
+    RUN_TEST(test_response_fault_status);
+    RUN_TEST(test_response_ee_cust);
     RUN_TEST(test_result_fits_3_bits);
     RUN_TEST(test_rw_bit_changes_crc);
     return UNITY_END();

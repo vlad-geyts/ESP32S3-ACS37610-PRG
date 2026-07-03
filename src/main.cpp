@@ -100,39 +100,59 @@ void programmerTask(void *pvParameters) {
 
     Serial.println("[AUTH] Port open — starting Read loop");
 
-    // --- Build READ FAULT_STATUS frame (12-bit read request, static) ---
-    const uint8_t  rd_addr  = 0x20;   // FAULT_STATUS register
-    const uint8_t  rd_crc   = crc3_read_request(rd_addr);
-    const uint64_t rd_frame = ((uint64_t)1       << 9) |
-                               ((uint64_t)rd_addr << 3) |
-                               ((uint64_t)rd_crc);
-
-//    Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", rd_frame, rd_crc);
+    // Cycle several registers so the serial log yields multiple (DATA, CRC)
+    // pairs — needed to pin down the exact span the device's response CRC covers.
+    const uint8_t rd_addrs[] = {0x20, 0x09, 0x0A};
+    size_t rd_idx = 0;
 
     for (;;) {
+        const uint8_t  rd_addr  = rd_addrs[rd_idx];
+        rd_idx = (rd_idx + 1) % (sizeof(rd_addrs) / sizeof(rd_addrs[0]));
+        const uint8_t  rd_crc   = crc3_read_request(rd_addr);
+        const uint64_t rd_frame = ((uint64_t)1       << 9) |
+                                   ((uint64_t)rd_addr << 3) |
+                                   ((uint64_t)rd_crc);
 
-        Serial.printf("[PROG] READ FAULT_STATUS  frame=0x%03llX  CRC=%d\n", rd_frame, rd_crc);
+        Serial.printf("[PROG] READ 0x%02X  frame=0x%03llX  CRC=%d\n", rd_addr, rd_frame, rd_crc);
         // arm_rx=true: RMT is armed inside TX just before PROG is released,
         // so capture starts before the device has a chance to respond.
         manchester_tx_send(rd_frame, 12, /*start_mark=*/false, /*end_mark=*/false, /*arm_rx=*/true);
 
-        // Response frame: SYNC[2] | R/W[1] | ADDR[6] | DATA[32] | CRC[3] = 44 bits
+        // Response frame (plan §2.6): SYNC[2] | DATA[32] | CRC[3] = 37 bits.
+        // Hardware shows the leading sync bit(s) may merge into the device's
+        // start mark, so accept 35–37 bits; DATA and CRC anchor to the LSB end.
         uint64_t response = 0;
         const uint8_t rx_bits = manchester_rx_receive(&response, 200);
 
-        if (rx_bits == 44) {
-            const uint8_t  rx_sync = (uint8_t)((response >> 42) & 0x3);
-            const uint8_t  rx_rw   = (uint8_t)((response >> 41) & 0x1);
-            const uint8_t  rx_addr = (uint8_t)((response >> 35) & 0x3F);
-            const uint32_t rx_data = (uint32_t)((response >> 3)  & 0xFFFFFFFFUL);
+        if (rx_bits >= 35 && rx_bits <= 37) {
+            const uint32_t rx_data = (uint32_t)((response >> 3) & 0xFFFFFFFFUL);
             const uint8_t  rx_crc  = (uint8_t)(response & 0x7);
-            Serial.printf("[RX]  SYNC=%d R/W=%d ADDR=0x%02X DATA=0x%08X CRC=%d\n",
-                          rx_sync, rx_rw, rx_addr, rx_data, rx_crc);
-        } else if (rx_bits == 0) {
-            Serial.println("[RX]  timeout — no data (device not responding?)");
+            // Response CRC covers DATA[32] only — hardware-verified 2026-07-03
+            // against live captures (including changing TEMP_OUT data in 0x20).
+            const bool crc_ok = (crc3_response(rx_data) == rx_crc);
+            Serial.printf("[RX]  ADDR=0x%02X DATA=0x%08X CRC=%d %s\n",
+                          rd_addr, rx_data, rx_crc, crc_ok ? "OK" : "** CRC FAIL **");
         } else {
-            Serial.printf("[RX]  decode error: got %d bits (expected 44)  raw=0x%011llX\n",
-                          rx_bits, response);
+            // Distinguish a true timeout (no edges captured) from a decode failure,
+            // and dump the raw pulse train for post-mortem (H/L + width in µs).
+            uint32_t raw[96];
+            const size_t rc = manchester_rx_last_raw(raw, 96);
+            if (rc == 0) {
+                Serial.println("[RX]  timeout — RMT captured no edges");
+            } else {
+                Serial.printf("[RX]  decode error: got %d bits (expected 35-37), raw items=%u\n",
+                              rx_bits, (unsigned)rc);
+                Serial.print("[RX]  pulses:");
+                for (size_t i = 0; i < rc; ++i) {
+                    const uint32_t d0 = raw[i] & 0x7FFFu;
+                    const uint32_t l0 = (raw[i] >> 15) & 1u;
+                    const uint32_t d1 = (raw[i] >> 16) & 0x7FFFu;
+                    const uint32_t l1 = (raw[i] >> 31) & 1u;
+                    if (d0) Serial.printf(" %c%lu", l0 ? 'H' : 'L', d0 / 10u);  // ticks→µs
+                    if (d1) Serial.printf(" %c%lu", l1 ? 'H' : 'L', d1 / 10u);
+                }
+                Serial.println();
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(2000));

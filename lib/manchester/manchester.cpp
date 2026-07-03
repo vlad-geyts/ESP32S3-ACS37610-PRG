@@ -22,6 +22,9 @@ static RingbufHandle_t s_rx_rb         = nullptr;
 // Prevents manchester_rx_receive() from re-arming (and losing captured data)
 // when the caller already armed via TX.
 static bool            s_rx_armed      = false;
+// Raw copy of the last capture, kept for post-mortem via manchester_rx_last_raw().
+static rmt_item32_t    s_last_items[96];
+static size_t          s_last_count    = 0;
 
 void manchester_tx_init(uint32_t bit_period_us) {
     s_half_us = bit_period_us / 2u;   // 33 / 2 = 16 µs → T ≈ 32 µs (31.25 kbps)
@@ -91,60 +94,10 @@ void manchester_tx_send(uint64_t bits, uint8_t bit_count,
 // RX — RMT_CHANNEL_4 Manchester decoder
 // ---------------------------------------------------------------------------
 
-// Expand RMT items to a half-period stream, stripping device start/end marks,
-// then decode Manchester bit pairs. Returns bit count on success, 0 on error.
-//
-// The ACS37610 wraps its response with 74 µs LOW marks:
-//   [LOW 74µs mark] [Manchester data] [LOW 74µs mark] [released to High-Z]
-//
-// The leading mark merges with the first Manchester half-period in the RMT
-// capture (both are LOW and contiguous). The algorithm detects any LOW pulse
-// that is longer than mark_thresh as a mark-containing pulse, strips the mark
-// portion, and emits only the remaining half-period (if any). This correctly
-// handles both the leading merge case and the trailing case where the mark may
-// or may not merge with the last bit's half-period.
-//
-// Mark detection is ONLY enabled when mark_ticks > 2×half_ticks (i.e. T < 74 µs,
-// production speed). At debug speed (T=100 µs, mark=74 µs < T), the mark
-// overlaps the double-half-period range so detection is ambiguous and disabled.
-static uint8_t decode_rmt(const rmt_item32_t *items, size_t count,
-                           uint32_t half_ticks, uint64_t *out) {
-    const uint32_t thresh      = half_ticks + half_ticks / 2u;    // 1.5 × T/2: single vs double half-period
-    const uint32_t mark_ticks  = kMarkUs * kRmtClkMhz;            // 74 µs in RMT ticks (740 at 10 MHz)
-    // Only apply mark detection when the mark is clearly longer than a full bit (T).
-    // At T=33 µs: mark(740) > 2×half(160)=320 → enable.
-    // At T=100 µs: mark(740) < 2×half(500)=1000 → disable to avoid stripping real data.
-    const bool     marks_enabled = (mark_ticks > 2u * half_ticks);
-    const uint32_t mark_thresh   = marks_enabled ? (mark_ticks - half_ticks / 2u) : UINT32_MAX;
-
-    uint8_t halves[90];   // max 44 bits × 2 = 88 half-periods
-    uint8_t n = 0;
-
-    for (size_t i = 0; i < count && n < 88u; ++i) {
-        auto push = [&](uint32_t dur, uint8_t lv) {
-            if (dur == 0u || n >= 88u) return;
-
-            if (lv == 0u && dur >= mark_thresh) {
-                // This LOW pulse contains a 74 µs mark. Subtract the mark and check
-                // if a half-period was merged in (happens when last bit = 1 or at start).
-                const uint32_t remainder = (dur >= mark_ticks) ? (dur - mark_ticks) : 0u;
-                if (remainder >= half_ticks / 2u && n < 88u) {
-                    halves[n++] = 0u;   // one LOW half-period merged with mark
-                }
-                return;   // skip the mark itself
-            }
-
-            // Normal Manchester pulse: 1 half-period, or 2 if duration ≈ T.
-            halves[n++] = lv;
-            if (dur >= thresh && n < 88u) halves[n++] = lv;
-        };
-
-        push(items[i].duration0, items[i].level0);
-        push(items[i].duration1, items[i].level1);
-    }
-
-    if (n < 2u || (n & 1u)) return 0u;  // must be even (2 half-periods per bit)
-
+// Pair up half-periods into Manchester bits. Returns bit count, 0 if any pair
+// is invalid (two equal halves) or the count is odd/empty.
+static uint8_t pair_decode(const uint8_t *halves, uint8_t n, uint64_t *out) {
+    if (n < 2u || (n & 1u) || n > 128u) return 0u;
     uint64_t bits = 0;
     const uint8_t bit_count = n / 2u;
     for (uint8_t i = 0; i < bit_count; ++i) {
@@ -156,6 +109,81 @@ static uint8_t decode_rmt(const rmt_item32_t *items, size_t count,
     }
     *out = bits;
     return bit_count;
+}
+
+// Expand RMT items to a half-period stream and decode Manchester bit pairs.
+// Returns bit count on success, 0 on error.
+//
+// Observed device response capture (hardware, T=33 µs):
+//   [HIGH turnaround ~25 µs, may be absent] [LOW start-mark ~30-50 µs, merges
+//   with the first data half-period] [Manchester data] [released to High-Z]
+//
+// Artefacts handled:
+//  - Leading turnaround HIGH: skipped (response data always starts LOW).
+//  - Leading LOW mark: its length varies, so whether it swallowed the first
+//    data half-period ('0' first bit) is ambiguous by duration alone. Both
+//    alignments are tried; Manchester pair validation rejects the wrong one
+//    (any double half-period in the stream anchors the alignment uniquely).
+//  - Trailing idle: the final HIGH either merges into the idle tail (recorded
+//    as a long pulse) or is dropped entirely (RMT idle terminator, duration 0).
+//    If the half count ends odd, one closing half is appended and validated.
+//  - A long LOW at the end (device end mark, if present) likewise ends the frame.
+static uint8_t decode_rmt(const rmt_item32_t *items, size_t count,
+                           uint32_t half_ticks, uint64_t *out) {
+    const uint32_t thresh   = half_ticks + half_ticks / 2u;  // 1.5 × T/2: single vs double
+    const uint32_t artifact = 3u * half_ticks;               // 1.5 × T: longer than any valid pulse
+
+    uint8_t halves[92];
+    uint8_t n = 0;
+    bool started        = false;  // set at the first LOW pulse
+    bool ambiguous_lead = false;  // first LOW contained a mark; alignment unknown
+    bool ended          = false;
+    uint8_t tail_level  = 1u;     // level of the terminating artefact (idle = HIGH)
+
+    auto push = [&](uint32_t dur, uint8_t lv) {
+        if (ended || dur == 0u || n >= 88u) return;
+
+        if (!started) {
+            if (lv != 0u) return;        // skip bus-turnaround HIGH before the response
+            started = true;
+            if (dur >= thresh) {         // long leading LOW = device start mark
+                ambiguous_lead = true;   // may hide one data half; resolved below
+                return;
+            }
+            halves[n++] = 0u;            // plain first half-period, no mark
+            return;
+        }
+
+        if (dur >= artifact) {           // idle tail or device end mark: frame over
+            tail_level = lv;
+            ended = true;
+            return;
+        }
+
+        halves[n++] = lv;                        // single half-period...
+        if (dur >= thresh && n < 88u) halves[n++] = lv;  // ...or double
+    };
+
+    for (size_t i = 0; i < count && !ended; ++i) {
+        push(items[i].duration0, items[i].level0);
+        push(items[i].duration1, items[i].level1);
+    }
+
+    // Try both lead alignments (merged data half vs mark only). For each, fix
+    // trailing parity by appending one tail-level half (the half that merged
+    // into / was dropped with the terminating artefact). pair_decode() rejects
+    // structurally wrong candidates.
+    uint8_t buf[92];
+    const uint8_t lead_options = ambiguous_lead ? 2u : 1u;
+    for (uint8_t lead = 0; lead < lead_options; ++lead) {
+        uint8_t m = 0;
+        if (ambiguous_lead && lead == 0u) buf[m++] = 0u;  // candidate: mark hid one L half
+        for (uint8_t i = 0; i < n && m < 90u; ++i) buf[m++] = halves[i];
+        if ((m & 1u) && m < 90u) buf[m++] = tail_level;   // close the final pair
+        const uint8_t bits = pair_decode(buf, m, out);
+        if (bits) return bits;
+    }
+    return 0u;
 }
 
 void manchester_rx_init(uint32_t bit_period_us) {
@@ -170,12 +198,15 @@ void manchester_rx_init(uint32_t bit_period_us) {
     cfg.mem_block_num = 2u;          // 128 items; 44-bit frame needs ≤ 44 items
     cfg.rx_config.filter_en           = true;
     cfg.rx_config.filter_ticks_thresh = 40u;   // 4 µs glitch filter
-    // idle_threshold must be > T (max consecutive HIGH in Manchester = one full bit period)
-    // so it doesn't fire mid-frame on a double-half-period HIGH boundary (e.g. 0→1 bit pair).
-    // Using 3×T guarantees this at any speed: at T=33 µs → 990 ticks (99 µs);
-    //                                          at T=100 µs → 3000 ticks (300 µs).
-    // The device responds within a few µs of PROG going HIGH (well under 3×T).
-    cfg.rx_config.idle_threshold = (uint16_t)(s_rx_half_ticks * 6u); // = 3×T
+    // idle_threshold must exceed the longest valid intra-frame pulse or capture
+    // terminates mid-frame. Worst case is a device 74 µs mark merged with an
+    // adjacent LOW data half-period: mark + T/2. Add 3×T of margin on top:
+    //   T=33 µs → 740 + 990  = 1730 ticks (173 µs)
+    //   T=100 µs → 740 + 3000 = 3740 ticks (374 µs)
+    // End-of-frame is still detected fine — after the response PROG idles HIGH
+    // for the full 2 s command period.
+    cfg.rx_config.idle_threshold =
+        (uint16_t)(kMarkUs * kRmtClkMhz + s_rx_half_ticks * 6u);
 
     rmt_config(&cfg);
     rmt_driver_install(kRxChannel, 512u, 0);
@@ -211,10 +242,20 @@ uint8_t manchester_rx_receive(uint64_t *out_bits, uint32_t timeout_ms) {
         xRingbufferReceive(s_rx_rb, &rx_size, pdMS_TO_TICKS(timeout_ms)));
 
     rmt_rx_stop(kRxChannel);
+    s_last_count = 0;
     if (!items) return 0u;
 
-    const uint8_t n = decode_rmt(items, rx_size / sizeof(rmt_item32_t),
-                                  s_rx_half_ticks, out_bits);
+    const size_t item_count = rx_size / sizeof(rmt_item32_t);
+    s_last_count = (item_count < 96u) ? item_count : 96u;
+    for (size_t i = 0; i < s_last_count; ++i) s_last_items[i] = items[i];
+
+    const uint8_t n = decode_rmt(items, item_count, s_rx_half_ticks, out_bits);
     vRingbufferReturnItem(s_rx_rb, items);
+    return n;
+}
+
+size_t manchester_rx_last_raw(uint32_t *out, size_t max_out) {
+    const size_t n = (s_last_count < max_out) ? s_last_count : max_out;
+    for (size_t i = 0; i < n; ++i) out[i] = s_last_items[i].val;
     return n;
 }

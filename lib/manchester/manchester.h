@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 
 // Manchester TX/RX driver for ACS37610 PROG line (GPIO4, open-drain, 3.3 V).
@@ -37,3 +38,9 @@ void manchester_rx_init(uint32_t bit_period_us = 33);
 // The ACS37610 responds within 74 µs; this function arms RMT RX, waits for the
 // idle-threshold end-of-frame, decodes, and returns the bit count (0 = timeout/error).
 uint8_t manchester_rx_receive(uint64_t *out_bits, uint32_t timeout_ms = 100);
+
+// Debug: copy raw RMT items from the last manchester_rx_receive() call.
+// Each uint32 packs two pulses: bits[14:0]=duration0 (0.1 µs ticks), bit[15]=level0,
+// bits[30:16]=duration1, bit[31]=level1. Returns the number of items copied
+// (0 = last receive captured nothing, i.e. a true timeout).
+size_t manchester_rx_last_raw(uint32_t *out, size_t max_out);

@@ -868,5 +868,9 @@ Summary:
 
       Actually the safest value is: larger than T (max Manchester pulse) but smaller than end-of-frame gap. The device's end mark is 74µs LOW then releases to HIGH. After release, PROG = HIGH indefinitely (until next command). So idle_threshold just needs to be > T and < whatever gap is tolerable. A value of `bit_period_us * kRmtClkMhz * 2u` (2×T) works for both speeds: at T=33µs → 660 ticks (66µs), at T=100µs → 2000 ticks (200µs).
 
-If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: C:\Users\vgeyts\.claude\projects\c--Data-PlatformIO-ESP32S3-ACS37610-PRG\c0179196-56ee-42d0-8a14-42f4c8f757e0.jsonl
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at `office PC`:
+- C:\Users\vgeyts\.claude\projects\c--Data-PlatformIO-ESP32S3-ACS37610-PRG\c0179196-56ee-42d0-8a14-42f4c8f757e0.jsonl 
+Or at `home PC`:
+- C:\Users\UserV\.claude\projects\c--Data-PlatformIO-ESP32S3-ACS37610-PRG\c0179196-56ee-42d0-8a14-42f4c8f757e0.jsonl 
+
 Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.

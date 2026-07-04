@@ -874,3 +874,31 @@ Or at `home PC`:
 - C:\Users\UserV\.claude\projects\c--Data-PlatformIO-ESP32S3-ACS37610-PRG\c0179196-56ee-42d0-8a14-42f4c8f757e0.jsonl 
 
 Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+
+
+The read path is complete and fully verified. Every one of the ~20 frames in your log satisfies CRC == crc3(DATA) — and crucially, register 0x20's data was changing between reads (TEMP_OUT climbing 0x878 → 0x883 as the die warmed up), so this isn't a coincidence: the *response CRC is CRC-3 over DATA[32] only, init 0b111 — your existing* `crc3_response()` *was correct all along*. The doc's §2.6 "Over SYNC + DATA" row was the error.
+
+Everything is now locked in:
+
+- `main.cpp` — verifies the CRC on every response and prints OK or ** CRC FAIL ** instead of the advisory value. Flash when convenient; expect [RX] ADDR=0x20 DATA=0x08xxxxxx CRC=n OK every 2 s.
+test_crc3.cpp — 6 hardware-verified response vectors added from your log (4 FAULT_STATUS values + both EE_CUST registers). All 8 native tests pass.
+- `Plan doc §2.6` — CRC row corrected with a note on how it was disproved, plus measured response behaviour: ~25 µs turnaround, ~30–50 µs start mark that merges with the first data half-period, no end mark.
+- Firmware build clean; project memory updated — Phase 3 (read path: TX request → RX capture → decode → CRC check) is done.
+
+A few observations from your data, for what they're worth: EE_CUST0 = `0x002095AE` and EE_CUST1 = `0x0003182E` are stable across all reads, as EEPROM should be. And FAULT_STATUS decoding per the plan gives TEMP_OUT = `(DATA >> 16) & 0xFFF`, so you were watching the sensor's die temperature rise in real time — a nice free sanity check of the whole chain.
+
+Natural next steps whenever you're ready: Phase 4 write commands (WRAM, then WEEP with the 35 ms t_w delay and read-back verify), or the ASCII command parser from the Phase 5 GUI plan. The read loop cycling 0x20/0x09/0x0A was only for CRC calibration — happy to simplify it back to a single register or straight into the command-parser structure.
+
+
+`BY ME: Excellent work. At this point no futher validation on firmware side. We'll proceed with GUI development. The 4 write commands will be validated  using the ASCII command parser from the Pahse 5 GUI plan. Let me soe time to revise the curremt GUI plan. I have some ideas on contrpl buttons and corresponding indicators layout on  the main page (dashboard). I just need some time to finalize  it.`
+
+
+Sounds good — take your time with the dashboard layout. I've recorded the plan in project memory: firmware validation is closed, write commands (WRAM/WEEP) get validated through the ASCII command parser as part of Phase 5, and I'll wait for your revised control-button/indicator layout before touching the dashboard design.
+
+When you come back with your ideas, a natural starting order would be:
+
+  1. *Firmware command parser first* (`*IDN?, STATUS, PWRON/PWROFF, AUTH, READ, WRAM, WEEP`) — it's independent of any GUI layout decisions, gives you a way to exercise write commands from a plain serial terminal immediately, and the GUI then just becomes a client of a protocol that already works.
+  2. *Dashboard + tabs* per your revised layout, once you've settled it.
+  
+If you'd like, bring your layout ideas as a rough sketch, a text description, or even a photo of a hand drawing — any of those is enough for me to draft the PySide6 dashboard from. Until then, everything is committed-ready on the firmware side: read path validated, all 8 native tests passing, docs and memory up to date.

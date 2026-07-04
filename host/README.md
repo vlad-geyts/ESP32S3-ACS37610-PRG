@@ -16,7 +16,19 @@ py -m venv .venv
 | `acs_gui/transport.py` | G2 | Serial port + line framing, single in-flight command |
 | `acs_gui/protocol.py`  | G2 | Typed client: `idn/status/power_on/auth/read_register/write_ram/write_eeprom`; `ERR` → typed exceptions |
 | `acs_gui/registers.py` | G3 | Register/field model + encode/decode codec (plan §6) |
-| GUI (`app.py`, tabs)   | G4+ | Not yet implemented |
+| `acs_gui/worker.py`    | G4 | Qt worker thread owning all serial I/O; UI talks via signals |
+| `acs_gui/mainwindow.py` + `views/main_tab.py` | G4 | MAIN tab: connect, Power On/Off, ENABLE DEVICE gating, Read All, activity log |
+| Register tabs, Save/Load | G5/G6 | Placeholders present, not yet implemented |
+
+## Run the GUI
+
+```bat
+cd host
+.venv\Scripts\python.exe -m acs_gui.app
+```
+
+Workflow: select COM port → Connect → Power On → **ENABLE DEVICE** (data controls stay
+grey until it succeeds) → Read All. The activity log shows every protocol line.
 
 ## Tests (no hardware needed)
 

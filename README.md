@@ -966,3 +966,193 @@ All set for the PC switch — and understood, the git push is yours; I haven't t
 `Documents/ACS37610_Programmer_Development_Plan_v4.1.md` (§2.5.2 completion-pulse note), and your `README.md` edit. Make sure those ride along in your push, otherwise the home PC will build with the old 35 ms delay.
 
 Once you've transferred `.claude` and pulled the repo at home, just open a session and say "continue with G2/G3" — the memory has everything needed to start on `transport.py`, `protocol.py`, and `registers.py` with their pytest suites. Good luck with the move!
+
+
+**G2 and G3 are complete — 38 pytest tests passing on your home-PC venv**. The full host-side Python stack under `host/` now mirrors the GUI plan §5.1 layout:
+
+  - **transport.py** (G2) — `SerialTransport`: owns the COM port, frames `\n`-terminated command/response lines, flushes stale input (e.g. boot banner) before each send, and serializes access with a lock so only one command is ever in flight. One deliberate deviation from §5.2: the Qt `QThread` wrapper is deferred to G4 — nothing imports Qt yet, which keeps G2 "scriptable" per the plan and the tests Qt-free. The GUI thread will own this same class later.
+  - **protocol.py** (G2) — `ProtocolClient` with typed methods (`idn, status, power_on/off, auth, read_register, write_ram, write_eeprom(force=)`). Every firmware `ERR code)` raises its own exception class (`PortNotOpenError`, `LockedError`, `VerifyError`, …), bad addresses/data fail locally with `ValueError` before touching the wire, and READ verifies the echoed address. `WEEP` gets a 3 s timeout to cover the firmware's 40 ms t_w + verify.
+  - **registers.py** (G3) — declarative field maps for EE_CUST0/1/2 and FAULT_STATUS per §6, with shadows 0x19/0x1A sharing their EEPROM twins' bit maps, `ALL_ADDRS` for Read All/Save to File, and validated `decode/encode`.
+
+The tests are grounded in your real hardware sessions: protocol tests replay the exact reply strings from your G1 smoke test, and register tests assert decoded fields from live reads — your EE_CUST0 value `0x002095AE` decodes to POL=1, QVO=74, SENS_FINE=430.
+
+Two things you may want to do next:
+
+  1. **Hardware check of the stack**: `host\.venv\Scripts\python.exe hw_smoke.py COMx` — a read-only script (IDN → PWRON → AUTH → decoded read of all six registers → PWROFF) that exercises G2+G3 end-to-end against the programmer.
+  2. Then **G4** — the PySide6 MainWindow and MAIN tab with your ENABLE DEVICE gating, indicators, Save/Load buttons, and activity log.
+
+Memory is updated with all of it, including the note that your pinned `requirements.txt` and `.venv` were kept as-is.
+
+
+`BY ME: Should we use USB-OTG on hardware to check the stack?`
+
+No — I'd recommend against it for this check. Run `hw_smoke.py` over the same CH343 UART COM port you used for the G1 terminal test. The reasoning:
+
+**The point of this check is to isolate the new code**. The thing under test is the Python stack (transport/protocol/registers). Your G1 smoke test already proved the firmware answers correctly over the CH343 link, so any failure seen through that same port points squarely at the Python side. Switching to USB-OTG at the same time changes two variables at once — a failure could then be the new transport, not the stack.
+
+**USB-OTG isn't just plugging into the other connector — it's a firmware change**. The current build has `ARDUINO_USB_MODE=0, ARDUINO_USB_CDC_ON_BOOT=0`, so `Serial` is UART0 through the bridge; the native USB port (GPIO19/20) isn't running CDC at all. Enabling it means new build flags, a reflash, and re-entering firmware territory we just declared closed and validated.
+
+**Native USB-CDC has its own qualification concerns** — this is exactly why the GUI plan carries it as open item O3: the CDC port disappears and re-enumerates on every reset (the CH343 port stays put), Windows driver/enumeration behavior needs re-verification, and DTR-triggered auto-reset can interact with opening the port. Those deserve their own dedicated test pass, not to be discovered mid-G2-validation.
+
+The good news is the protocol was designed transport-agnostic (§1.3), so the switch later is cheap and low-risk: flip the two build flags, reflash, and run the same `hw_smoke.py` against the new COM port — the script doubles as the qualification tool for the USB-CDC transport. My suggestion: validate the stack now on CH343, build the GUI against it (G4–G6), and do the USB-OTG switch as a deliberate step during Phase-5 hardening when the whole toolchain can re-qualify it in one pass.
+
+
+
+PS C:\Data\Platformio\ESP32S3-ACS37610-PRG> cd^C
+PS C:\Data\Platformio\ESP32S3-ACS37610-PRG> (Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned) ; (& c:\Data\Platformio\ESP32S3-ACS37610-PRG\host\.venv\Scripts\Activate.ps1)
+(.venv) PS C:\Data\Platformio\ESP32S3-ACS37610-PRG> cd host
+(.venv) PS C:\Data\Platformio\ESP32S3-ACS37610-PRG\host> .venv\Scripts\python.exe hw_smoke.py COM3
+IDN     : ACS37610-PRG 1.0.0
+STATUS  : Status(pwr=False, port_open=False, last_error='NONE')
+PWRON   : OK
+AUTH    : OK (device port open)
+READ 09 : DATA=0x002095AE ECC=OK  [EE_CUST0 RW]
+          WRITE_LOCK = 0
+          COM_LOCK = 0
+          SPARE = 0
+          OTF_DIS = 0
+          POL = 1
+          CLAMP_EN = 0
+          FAULT_DIS = 0
+          FAULTR_DIS = 0
+          QVO = 74
+          SENS_FINE = 430
+READ 19 : DATA=0x002095AE ECC=NA  [EE_CUST0 shadow]
+          WRITE_LOCK = 0
+          COM_LOCK = 0
+          SPARE = 0
+          OTF_DIS = 0
+          POL = 1
+          CLAMP_EN = 0
+          FAULT_DIS = 0
+          FAULTR_DIS = 0
+          QVO = 74
+          SENS_FINE = 430
+READ 0A : DATA=0x0003182E ECC=OK  [EE_CUST1 RW]
+          OCF_HYST = 0
+          FAULT_LATCH = 0
+          OCF_P_DIS = 0
+          OCF_N_DIS = 0
+          OCF_QUAL = 0
+          OTF_THRESH = 12
+          OCF_N_THRES = 48
+          OCF_P_THRES = 46
+READ 1A : DATA=0x0003182E ECC=NA  [EE_CUST1 shadow]
+          OCF_HYST = 0
+          FAULT_LATCH = 0
+          OCF_P_DIS = 0
+          OCF_N_DIS = 0
+          OCF_QUAL = 0
+          OTF_THRESH = 12
+          OCF_N_THRES = 48
+          OCF_P_THRES = 46
+READ 0B : DATA=0x00123456 ECC=OK  [EE_CUST2 RW]
+          C_SPARE = 1193046
+READ 20 : DATA=0x08080010 ECC=NA  [FAULT_STATUS RO]
+          TEMP_OUT = 2056
+          SPARE_HI = 0
+          UV_STAT = 0
+          OV_STAT = 0
+          OC_STAT = 0
+          OT_STAT = 0
+          FP_STAT = 0
+          SPARE_LO = 0
+          UV_EV = 1
+          OV_EV = 0
+          OC_EV = 0
+          OT_EV = 0
+          FP_EV = 0
+PWROFF  : OK
+
+G2/G3 smoke test PASSED
+
+
+
+G2/G3 hardware-validated — the entire chain (Python transport → protocol → firmware → PROG line → device → decode) works end-to-end. Let me record it:
+
+
+Three details in that output are worth calling out, because they're each independent confirmations:
+
+  1. `READ 0B` **returned** `0x00123456` — that's the value you wrote with `WEEP 0B` during the G1 terminal test. It survived power cycles and reads back with `ECC=OK`, so the EEPROM write path is proven durable, not just accepted.
+  2. **EEPROM/shadow pairs match** (0x09≡0x19, 0x0A≡0x1A) — consistent with the device loading shadows from EEPROM at power-up, exactly what the GUI's two-column EE_CUST tabs will display.
+  3. `UV_EV = 1` **with all** `*_STAT` **bits 0** — the undervoltage event flag latches during the power-up ramp (the read happened moments after PWRON), while live status is clean. That's expected behavior, and it's a nice preview of why the FAULT_STATUS tab distinguishes event flags from status flags.
+
+Also `TEMP_OUT = 2056` (0x808) vs 0x878 in earlier sessions — cooler die, since the DUT had been powered for barely a second. Everything decodes sensibly.
+
+That closes G2 and G3 with hardware validation, memory updated. The foundation is done: firmware protocol (G1), Python transport/protocol/registers (G2/G3) — all tested at every layer. Next is **G4, the first actual GUI**: PySide6 MainWindow with the MAIN tab — COM selector, Comm/Power indicators, Power On/Off, your ENABLE DEVICE gating, Read All, Save/Load buttons, and the activity log — wiring `SerialTranspor`t into a Qt worker thread. Ready when you are.
+
+
+**G4 is built — the first real GUI**. Run it with:
+
+
+`cd host`
+`.venv\Scripts\python.exe -m acs_gui.app`
+
+**What you'll see** — a window with five tabs (Main + four G5 placeholders). The Main tab has three control groups and the activity log:
+
+  - **Connection** — COM port selector, Refresh, Connect. Connect opens the port and probes *IDN?; the Comm indicator goes green with the firmware's ID string, or red if the probe fails.
+  - **DUT Control** — Power On/Off with the Power indicator (green ON / red OFF per the plan), and your ENABLE DEVICE button with a Device indicator. The gating works exactly as you specified: Read All (and later Save/Load) stays grey until ENABLE DEVICE succeeds, and re-greys on Power Off or disconnect.
+  - **Data** — Read All reads the six registers and logs each result; its indicator shows blue while running, then green/red. Save to File / Load from File are present in the layout but disabled with a "G6" tooltip.
+  - **Activity log** — every protocol line as it crosses the wire (`> READ 09 / < DATA 09 0x002095AE ECC=OK`), plus errors.
+
+**Architecture notes**: all serial I/O runs in a dedicated worker thread (`worker.py`) — the UI only exchanges Qt signals, so the window stays responsive even during a slow operation, and the single-in-flight rule (plan O5) is enforced by disabling controls while busy. Two safety behaviors worth knowing: **disconnect and window-close both power the DUT off** before releasing the port, so a closed app never leaves the DUT energized.
+
+Verified offscreen: window constructs, all five tabs present, and the full gating sequence (start → connect → power → enable → power-off) enables/disables the right buttons at each step. The 38 unit tests still pass.
+
+Give it a run against the hardware — the workflow is Connect → Power On → ENABLE DEVICE → Read All, and the log should mirror your hw_smoke.py session. After you're happy with the dashboard feel, next up is G5 (the register tabs with field editors and Write/verify) and G6 (wiring your Save/Load buttons).
+
+
+
+`BY ME: Is the GUI color coding dependent on Windows default color pallet? Currently the buttons which are not presseble (disabled) are too similar to the buttons which are pressable (enabled). What would you recommend to make those buttons pop.`
+
+Yes — that's exactly the cause. On Windows, Qt defaults to the native "windowsvista" style, which draws buttons with the system palette, and its disabled state only slightly dims the text — the notoriously low-contrast look you're seeing. (The status indicators don't have this problem because they use fixed stylesheet colors.)
+
+
+
+My recommendation is two-part, both palette-independent so the GUI looks identical on any machine:
+
+  1. **Switch to Qt's "Fusion" style** — cross-platform renderer that ignores the Windows theme and respects stylesheets predictably.
+  2. **Style buttons explicitly**: enabled = solid accent blue with white bold text (matching the ACTIVE indicator color, so "blue = actionable" reads consistently), with hover/pressed feedback; disabled = flat light grey with dim grey text. The difference becomes unmistakable at a glance.
+
+Applied in app.py — restart the GUI and the difference should be night and day:
+
+  - **Enabled buttons**: solid accent blue with white bold text — the same blue as the ACTIVE indicator, so "blue = you can act on this" reads consistently across the whole UI. They lighten on hover and darken when pressed, giving click feedback too.
+  - **Disabled buttons**: flat light grey with dim grey text — visually "switched off."  
+
+So at startup only **Connect** and **Refresh** will be blue; after connecting, **Power On** lights up; after power, **ENABLE DEVICE**; and only after that does **Read All** turn blue — your gating rule is now visible as a progression of buttons "waking up," which is arguably the most intuitive rendering of it.
+
+Since it's an application-wide stylesheet, the G5 register tabs and G6 Save/Load will inherit the same look automatically.
+
+Two easy tweaks if you want them: a different accent (e.g., amber) for ENABLE DEVICE specifically to emphasize it as the gate, or a green accent for "safe" actions vs. blue for everything else. The colors live in the `_STYLESHEET` block at the top of `app.py` — say the word and I'll adjust. 
+
+`BY ME: Yes, please apply those two easy tweaks.`
+
+Both tweaks applied. The button palette now encodes intent:
+
+  - **Amber — ENABLE DEVICE** only: visually distinct as the gate that unlocks everything below it.
+  - **Green — read-only/safe actions**: Refresh, Read All, and Save to File (it only reads the device; the file write is host-side).
+  - **Blue — state-changing actions**: Connect/Disconnect, Power On/Off, and Load from File (which will write EEPROM in G6 — deliberately not green).
+  - **Grey — disabled**, unchanged, and it overrides every role, so the gating progression still reads as buttons "waking up" into their color.
+
+
+  `BY ME: Now it looks much better. It is fuyly functional for G4.  Ready to move to G5 (the register tabs with field editors and Write/verify)`
+
+Excellent — G4 signed off. G5 brings the four register tabs alive: parameterized field tables, two-way raw-hex sync, per-tab Read/Write with read-back verify, and the WRITE_LOCK guard from plan §7.6. Three new UI modules plus worker extensions:
+
+**G5 is built — all four register tabs are now live**. Restart the app and the placeholders are gone. Everything verified offscreen using your real hardware register values, and the 38 unit tests still pass.
+
+**What each tab gives you:**
+
+  - **EE_CUST0 / EE_CUST1** — a field table with three value areas: read-only **EEPROM** and **Shadow** columns, plus an **Edit** column (checkboxes for 1-bit fields, bounded spinboxes for multi-bit). Below it, a **raw hex field synced two-way** with the editors — type `0x2095AE` and the fields update; toggle POL and the hex updates. Buttons: **Read** (fetches both EEPROM and shadow), **Write EEPROM** (WEEP + read-back verify), and **Write Shadow** (WRAM + read-back verify — the safe way to iterate before committing). Read prefills the editors with the current EEPROM value, so edits always start from reality.
+  - **EE_CUST2** — same tab, parameterized: single C_SPARE field, no shadow column or shadow button.
+  - **FAULT_STATUS** — read-only: TEMP_OUT (decimal + hex), raw word, and the ten flags as colored chips — grey when clear, red when set, split into "Live status" and "Latched events" so a latched `UV_EV=1` next to a clear `UV_STAT=0` reads correctly.
+
+
+  **Safety and behavior details:**
+    - **WRITE_LOCK is triple-guarded** per §7.6: its checkbox editor is disabled until you tick "Enable WRITE_LOCK editing"; a write with bit 25 set then demands you literally type **LOCK** in a confirmation dialog; and only then is the command sent with **FORCE** for the firmware's own guard.
+    - Every write ends with a **GUI-side read-back compare** — the Write indicator says "Verified" green or goes red with the mismatch in its tooltip. This matters especially for shadow writes, which the firmware doesn't verify.
+    - **Read All on the Main tab now populates all four tabs** automatically — the tabs listen to the same result signals.
+    - All tab buttons obey your ENABLE DEVICE gating and grey out while any operation runs.
+
+
+    **Suggested hardware check** (mirrors plan §11.3): Connect → Power On → ENABLE DEVICE → Read All and browse the tabs → change SENS_FINE on EE_CUST0 and **Write Shadow** (volatile, harmless) → verify green + shadow column updates → **Write EEPROM** on EE_CUST2's C_SPARE (your designated safe register) → verify. After that, G6 wires up your Save to File / Load from File buttons.

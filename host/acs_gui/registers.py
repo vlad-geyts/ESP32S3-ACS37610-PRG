@@ -9,7 +9,9 @@ other registers carry a 26-bit payload DATA[25:0].
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+DATA26_MASK = 0x03FFFFFF   # 26-bit register payload DATA[25:0]
 
 
 @dataclass(frozen=True)

@@ -12,7 +12,11 @@ static constexpr uint32_t kAccessData   = 0x2C413736UL;
 // Post-AUTH settle: spec says 90-120 µs (v4.1 §2.4); 500 µs is the
 // hardware-validated value used throughout Phase 3 bring-up.
 static constexpr uint32_t kSettleUs     = 500;
-static constexpr uint32_t kTwMs         = 35;    // EEPROM write time, max (v4.1 §2.5.2)
+// EEPROM write time t_w is 25-35 ms (v4.1 §2.5.2). The device pulses PROG LOW
+// (~1 Tbit) when internal programming completes — observed at ~33 ms (scope,
+// 2026-07-04). 40 ms keeps the verify read clear of that completion pulse even
+// for a device at the slow end of t_w.
+static constexpr uint32_t kTwMs         = 40;
 static constexpr uint32_t kRxTimeoutMs  = 200;
 static constexpr uint32_t kData26Mask   = 0x03FFFFFFUL;
 static constexpr uint8_t  kWriteLockAddr = 0x09;          // EE_CUST0

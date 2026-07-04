@@ -192,6 +192,13 @@ SYNC[2] | R/W[1] | ADDR[6] | DATA[32] | CRC[3]
 - **DATA[31:26] shall be set to zero.** The device automatically generates and stores its own 6-bit ECC based on DATA[25:0]; the controller-supplied value in DATA[31:26] is ignored. No ECC computation is required in firmware.
 - Firmware must **verify after every EEPROM write** by issuing a Read command and comparing the returned DATA[25:0] to the written value.
 
+> **Measured behaviour (scope, 2026-07-04):** after an EEPROM write, the **device pulses PROG
+> LOW for ~1 Tbit (~33 µs) at ~33 ms after the write frame ends** — apparently signalling
+> internal programming completion (within the t_w 25–35 ms window). The controller is idle at
+> that moment, so the pulse is harmless. To keep the verify read clear of the pulse even for a
+> device at the slow end of t_w, the firmware waits **40 ms** (kTwMs, `lib/acs37610_cmd`) rather
+> than the 35 ms spec maximum. A future enhancement could detect the completion pulse instead.
+
 ---
 
 ### 2.6 Read Command (Controller → Device, then Device → Controller)

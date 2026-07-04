@@ -950,3 +950,19 @@ Recorded in the project memory and as a measured-behaviour note in the dev plan 
 Done. `kTwMs` is now 40 ms in `acs37610_cmd.cpp` with a comment explaining the completion-pulse observation behind it, firmware rebuilds clean, and both the memory note and dev plan §2.5.2 now record the mitigation as applied. The verify read after every `WEEP` now starts ~7 ms after the latest observed completion pulse instead of ~1.7 ms.
 
 Worth a quick re-flash and one `WEEP 0B` sanity check next time the hardware is on the bench, but the change is timing-only — no protocol or logic touched. Ready to move on to G2/G3 (Python transport + protocol client + register model) whenever you are.
+
+`BY ME: Confirmed. The READ 0B intiated  7ms afyter the devive is signaling completion EEPROM programming. Right now I'm working from my Office PC.  I'll be continue working on this project from my Home PC. Since I'me switching PCs, please update thje script and memory files. I'll transfer [.calude] conent manually from office to home PC (I 've  done this before ). We'll continue with G2/G3 development.`
+
+All set for the PC switch — and understood, the git push is yours; I haven't touched the repo.
+
+**Memory files updated for the handoff:**
+
+  - `project_acs37610.md` — records the 40 ms t_w fix as hardware-confirmed (verify READ now ~7 ms after the device's completion pulse), G1 closed, and a detailed **"NEXT UP: G2 + G3"** section: what `transport.py/protocol.py/registers.py` must do, that tests run against a mock serial replaying your real smoke-test session, and that GUI plan v1.1 is the spec.
+  - `user_two_pc_workflow.md` — new: notes your Office↔Home two-PC workflow so future sessions verify machine-specific things (COM ports, tool paths) instead of assuming them.
+  - `MEMORY.md` index refreshed to match.
+
+**One thing before you switch:** three files are still uncommitted in the working tree — `lib/acs37610_cmd/acs37610_cmd.cpp` (the 40 ms change), 
+
+`Documents/ACS37610_Programmer_Development_Plan_v4.1.md` (§2.5.2 completion-pulse note), and your `README.md` edit. Make sure those ride along in your push, otherwise the home PC will build with the old 35 ms delay.
+
+Once you've transferred `.claude` and pulled the repo at home, just open a session and say "continue with G2/G3" — the memory has everything needed to start on `transport.py`, `protocol.py`, and `registers.py` with their pytest suites. Good luck with the move!

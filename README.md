@@ -902,3 +902,29 @@ When you come back with your ideas, a natural starting order would be:
   2. *Dashboard + tabs* per your revised layout, once you've settled it.
   
 If you'd like, bring your layout ideas as a rough sketch, a text description, or even a photo of a hand drawing — any of those is enough for me to draft the PySide6 dashboard from. Until then, everything is committed-ready on the firmware side: read path validated, all 8 native tests passing, docs and memory up to date.
+
+
+`BY ME: Update to "MAIN" tab: 1) Add  an "ENABLE DEVICE" button  - triggers a write to device the "Access Code".  If this button is not pressesed after powering up the programmer, all control buttons should be disabled ("grey').  2) Add "Save to File" button. If pressed - generats  sequnce  commands to read content of all memory location ( 0x09, 0x19, 0x0A, 0x1A, 0x0B, 0x20). and save it's content to a file.  3) Add "Load from File" button and accociated status indicator. If pressed - generats a sequance of command to write saved values from file into 0x09 and 0x0A memory loactions. Also it should trigger  a read back command sqeuence to vrify that there are no write erros to EEPROM.    That are all updates to  GUI.  I do not have specific layout requirement., rather than it should be readable and intuitive.    Now we can start with step 1. "Firmware command parser" implementatio.`
+
+G1 is done: the firmware now speaks the full ASCII command protocol — built clean, 30/30 native tests passing. Your three MAIN-tab updates are also folded into the GUI plan (now v1.1).
+
+What the firmware does now (`main.cpp`): the old hardcoded boot-AUTH + read loop is gone. The programmer boots with the DUT rail off, answers nothing until spoken to, and responds one line per command:
+
+> *IDN?                 < ID ACS37610-PRG 1.0.0
+> PWRON                 < OK
+> AUTH                  < OK                     ← your ENABLE DEVICE button
+> READ 20               < DATA 20 0x08830000 ECC=NA
+> READ 09               < DATA 09 0x002095AE ECC=OK
+> WRAM 19 0x2095AE      < OK
+> WEEP 0B 0x123456      < OK VERIFY=OK           ← t_w 35 ms + read-back inside
+> STATUS                < STATUS PWR=1 PORT=1 ERR=NONE
+
+**New modules**, split so the logic stays natively testable:
+
+  - *acs37610_frames* — pure frame builders + response parsing + ECC decode. Its tests use only hardware-verified vectors from your logs (AUTH frame `0x1896209B9B5`, read frames, captured responses).
+  - *acs37610_cmd* — hardware transactions and state (power/port-open), post-AUTH settle, EEPROM t_w + verify. The WRITE_LOCK guard refuses `WEEP 09` with bit 25 set unless `FORCE` is appended — the plan's §4.3 defense-in-depth.
+cmd_parser — the §3 protocol. Handlers are injected, so its 13 tests run against mocks: sequencing rules (`ERR PWROFF, ERR PORT`), argument validation, error mapping, case-insensitivity.
+
+One build-system gotcha worth knowing: chain-mode LDF doesn't resolve lib→lib includes, so each new library carries a `library.json` declaring its local dependencies — noted in memory for future modules.
+
+**To smoke-test on hardware**: flash, open the PlatformIO monitor at 115200, and type the session above (device connected). `READ 20` before `AUTH` should answer `ERR PORT` — that's the port-open rule working, and it's also the firmware-side proof of your ENABLE DEVICE gating concept. When you're satisfied, next is G2/G3: the Python side (`transport.py, protocol.py, registers.py`) — all testable against a mock serial port before the GUI itself goes on top.

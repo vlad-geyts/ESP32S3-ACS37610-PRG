@@ -1,0 +1,9 @@
+{
+    "name": "acs37610_cmd",
+    "version": "1.0.0",
+    "description": "ACS37610 hardware transaction layer (firmware-only)",
+    "dependencies": [
+        { "name": "acs37610_frames" },
+        { "name": "manchester" }
+    ]
+}

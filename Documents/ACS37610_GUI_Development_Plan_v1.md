@@ -2,8 +2,18 @@
 **Host application:** Python 3.10+ / PySide6 (Qt) HMI on Windows PC
 **Controller (target):** ESP32-S3-DEVKITC-1N16R8V running the ACS37610 programmer firmware
 **Device (DUT):** ACS37610LLUATR-010B3 on custom eval board
-**Document version:** v1.0 — Initial detailed GUI development plan
+**Document version:** v1.1 — Main-tab updates (ENABLE DEVICE gating, Save to File, Load from File with write+verify)
 **Status:** Draft for review
+
+> **v1.1 changes (user requirements, 2026-07-04):**
+> 1. New **ENABLE DEVICE** button — sends the Access Code (`AUTH`). Until it succeeds after
+>    programmer power-up, all other control buttons are disabled (grey).
+> 2. New **Save to File** button — runs the full read sequence (`0x09, 0x19, 0x0A, 0x1A, 0x0B,
+>    0x20`) and saves the contents to a file.
+> 3. New **Load from File** button + status indicator — writes saved values to EEPROM `0x09` and
+>    `0x0A`, then triggers a read-back sequence to verify there are no EEPROM write errors.
+>    (Supersedes v1.0's "Load never auto-writes" rule in §8.7.)
+> No specific layout requirement — readable and intuitive.
 
 > **Companion document.** This plan is the detailed GUI counterpart to
 > `ACS37610_Programmer_Development_Plan_v4.md` (header v4.1, "Approved"), and expands its
@@ -345,12 +355,13 @@ Five tabs in a `QTabWidget`: **Main**, **EE_CUST0**, **EE_CUST1**, **EE_CUST2**,
 | **COM port** selector + **Connect/Disconnect** | Lists serial ports; Connect opens port and probes `*IDN?` (§5.3) |
 | **Communication** status bar | Green = app is communicating with the programmer; Red = not connected / no response (Ideas req #2) |
 | **Power** status bar | Green = DUT powered (PWR=1); Red = DUT unpowered (Ideas req #2) |
-| **Power On** button | Sends `PWRON` (PWR_EN low → 3.3 V rail on); then host auto-`AUTH` to open port (§8.2) |
-| **Power Off** button | Sends `PWROFF` (PWR_EN high); clears port-open state |
+| **Power On** button | Sends `PWRON` (PWR_EN low → 3.3 V rail on). Does **not** auto-AUTH — port opening is the explicit ENABLE DEVICE action (v1.1) |
+| **Power Off** button | Sends `PWROFF` (PWR_EN high); clears port-open state and re-disables the gated controls |
+| **ENABLE DEVICE** button (v1.1) | Sends `AUTH` (Access Code → `0x31`). **Gating rule:** after programmer power-up (and after any DUT power cycle / Power Off), all control buttons below this row are disabled (grey) until ENABLE DEVICE succeeds. Only COM/Connect, Power On/Off and ENABLE DEVICE itself remain active |
 | **Read All** button | Reads every register backing the tabs: `0x09, 0x19, 0x0A, 0x1A, 0x0B, 0x20` (§8.3) |
 | **Read All** status bar | Green = all reads completed; Red = any read failed (no response / CRC / ECC) (Ideas req #2) |
-| **Save All to file** | Writes current register snapshot to JSON (§9, Ideas req #4) |
-| **Load All from file** | Loads a JSON snapshot into the tab editors for review (§9, Ideas req #5) |
+| **Save to File** button (v1.1) | Runs the full read sequence over `0x09, 0x19, 0x0A, 0x1A, 0x0B, 0x20`, then writes the snapshot to JSON (§9). Any read failure aborts the save |
+| **Load from File** button + status indicator (v1.1) | Loads a JSON snapshot, writes the saved values to EEPROM `0x09` and `0x0A` (`WEEP`), then triggers a read-back command sequence to verify there are no EEPROM write errors. Indicator: green = all writes verified; red = any write/verify error. WRITE_LOCK guard (§7.6) still applies |
 | **Activity log** panel | Scrolling view of sent commands / responses / errors (engineering aid) |
 
 > "Read All" reads the six registers shown across the four data tabs. The Ideas doc phrase
@@ -401,9 +412,14 @@ Each workflow drives the §3 commands and sets the relevant StatusIndicator
 `open(port)` → `*IDN?`. Valid `ID …` → Comm green; else Comm red + close. (§5.3)
 
 ### 8.2 Power On / Off
-- **Power On:** `PWRON` → on `OK`, Power indicator green → auto `AUTH` → on `OK`, port marked
-  open (ready for reads/writes). Any error → Power red + log.
-- **Power Off:** `PWROFF` → Power indicator red; port-open state cleared.
+- **Power On:** `PWRON` → on `OK`, Power indicator green. No auto-AUTH (v1.1) — the port stays
+  closed and gated controls stay grey until ENABLE DEVICE (§8.2a).
+- **Power Off:** `PWROFF` → Power indicator red; port-open state cleared; gated controls re-grey.
+
+### 8.2a Enable Device (v1.1)
+`AUTH` → on `OK`: port marked open, all gated control buttons enabled. On error: controls stay
+grey, log the error. Required once after every DUT power cycle (the device closes its serial port
+on power loss).
 
 ### 8.3 Read All
 Iterate `READ` over `[0x09, 0x19, 0x0A, 0x1A, 0x0B, 0x20]`; decode each into its tab. All succeed
@@ -429,10 +445,16 @@ status bar green/red.
 Editors update the raw-hex field live and vice-versa (two-way sync via the codec). Out-of-range
 entries are clamped/rejected per field bit width. Edits are local until a Write.
 
-### 8.7 Save / Load file
-- **Save All:** snapshot all tab values → JSON (§9).
-- **Load All:** parse JSON → populate editors for review. **Load never auto-writes the device** —
-  the user reviews, then explicitly Writes per tab (or a future "Write All" with confirmation).
+### 8.7 Save / Load file (revised v1.1)
+- **Save to File:** run the Read All sequence (§8.3) over `0x09, 0x19, 0x0A, 0x1A, 0x0B, 0x20`;
+  on success write the snapshot to JSON (§9). Any read failure aborts the save (partial snapshots
+  are not written) and flags the status red.
+- **Load from File:** parse and validate the JSON → write the saved values to EEPROM `0x09`
+  (`WEEP 09`) and `0x0A` (`WEEP 0A`) → run a read-back command sequence and compare against the
+  written values to verify there are no EEPROM write errors → Load status indicator green
+  (all verified) or red (any failure). The WRITE_LOCK guard (§7.6) applies to the loaded `0x09`
+  value; a snapshot with bit[25]=1 requires the same explicit confirmation. Loaded values are also
+  populated into the tab editors so the user sees what was written.
 
 ---
 
@@ -512,7 +534,7 @@ JSON, human-readable, versioned. Stores raw words and decoded fields plus metada
 | # | Item | Disposition |
 |---|------|-------------|
 | O1 | **EE_CUST2 address 0x08 vs 0x0B** | Plan uses **0x0B** (v4.1 §2.7, Approved). Address centralized in `registers.py`. **Confirm against Allegro datasheet** before EEPROM writes to EE_CUST2. |
-| O2 | AUTH / port-open ownership | Host orchestrates `PWRON→AUTH→settle`; firmware also offers optional auto-AUTH in `PWRON`. Decide default during G1. |
+| O2 | AUTH / port-open ownership | **Resolved v1.1:** AUTH is an explicit user action (ENABLE DEVICE button, §7.1). `PWRON` never auto-AUTHs; firmware keeps the primitives separate. |
 | O3 | USB-CDC vs UART COM enumeration on Windows | GUI is port-agnostic (selector). When firmware switches to `ARDUINO_USB_CDC_ON_BOOT=1`, re-verify enumeration / driver (v4.1 R6). |
 | O4 | **WRITE_LOCK OTP** | Permanent lock if bit[25] committed. Guarded in **both** GUI (§7.6) and firmware (§4.3). Keep disabled by default. |
 | O5 | Serial concurrency | Strictly single in-flight command; UI disables controls during a command. No overlapping PROG frames. |

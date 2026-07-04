@@ -1,0 +1,8 @@
+{
+    "name": "acs37610_frames",
+    "version": "1.0.0",
+    "description": "Pure ACS37610 frame builders + response parsing (natively testable)",
+    "dependencies": [
+        { "name": "crc3" }
+    ]
+}

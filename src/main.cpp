@@ -2,7 +2,10 @@
 #include <Adafruit_NeoPixel.h>
 #include "unused_gpio.h"
 #include "manchester.h"
-#include "crc3.h"
+#include "acs37610_cmd.h"
+#include "cmd_parser.h"
+
+#define FW_VERSION "1.0.0"
 
 // WS2812 Configuration
 #define WS2812_PIN      48
@@ -43,13 +46,12 @@ void setup() {
     gpioConfig();
     ws2812.begin();
 
-    // Manchester TX (bit-bang) and RX (RMT_CHANNEL_1) — 30 kbps, T=33 µs
+    // Manchester TX (bit-bang) and RX (RMT_CHANNEL_4) — 30 kbps, T=33 µs
     manchester_tx_init(33);
     manchester_rx_init(33);
 
-    // Enable 3.3V power supply 
-    digitalWrite(Config::PwrEn, LOW);
-    delay(100); // delay to stabilize 3.3V power rail
+    // DUT rail stays OFF at boot; the host enables it with PWRON (GUI plan §3).
+    acs_init(Config::PwrEn);
 
     // Programmer task on Core 1, priority 5 (timing-critical RMT work)
     xTaskCreatePinnedToCore(programmerTask, "Programmer", 8192, NULL, 5, NULL, 1);
@@ -69,93 +71,50 @@ void gpioConfig() {
     pinMode(Config::StrobOut, OUTPUT);
     digitalWrite(Config::StrobOut, LOW);
     pinMode(Config::PwrEn, OUTPUT);
-//    digitalWrite(Config::PwrEn, HIGH); // turn of 3.3V LDO
-//    delay(1000); //delay to set 3.3V rail to 0
+    digitalWrite(Config::PwrEn, HIGH); // 3.3V LDO off — DUT unpowered until PWRON
 }
 
 // Programmer task — Core 1, priority 5.
-// Boot sequence: send Access Code to open the device serial port, wait 120 µs settle.
-// Then loop every 2 s: send READ FAULT_STATUS request, receive and print 44-bit response.
+// ASCII command loop (GUI plan §3/§4): reads '\n'-terminated lines from
+// Serial, dispatches through cmd_parser, answers exactly one line per command.
+// All device sequencing (PWRON → AUTH → READ/WRAM/WEEP) is host-driven.
 void programmerTask(void *pvParameters) {
+    static const CmdHandlers handlers = {
+        acs_power,
+        acs_power_state,
+        acs_port_open,
+        acs_auth,
+        acs_read,
+        acs_write_ram,
+        acs_write_eeprom,
+    };
+    cmd_parser_init(&handlers, FW_VERSION);
 
-    // Enable 3.3V power supply 
-    digitalWrite(Config::PwrEn, LOW);
-    delay(3000); // delay to stabilize 3.3V power rail
-
-    // --- Access Code (opens device serial port, mandatory after every power cycle) ---
-    // 44-bit write frame: SYNC=00 | R/W=0 | ADDR=0x31 | DATA=0x2C413736 | CRC[3]
-    const uint32_t kAccessData = 0x2C413736UL;
-    const uint8_t  kAccessAddr = 0x31;
-    const uint8_t  ac_crc      = crc3_write(0, kAccessAddr, kAccessData);
-
-    const uint64_t ac_frame    = ((uint64_t)kAccessAddr  << 35) |
-                                  ((uint64_t)kAccessData  <<  3) |
-                                  ((uint64_t)ac_crc);
-
-    Serial.printf("[AUTH] Sending Access Code  frame=0x%011llX  CRC=%d\n", ac_frame, ac_crc);
-    manchester_tx_send(ac_frame, 44, /*start_mark=*/true, /*end_mark=*/true);
-
-    // Wait 120 µs post-Access-Code settle before issuing any Read/Write command.
-    esp_rom_delay_us(500);
-
-    Serial.println("[AUTH] Port open — starting Read loop");
-
-    // Cycle several registers so the serial log yields multiple (DATA, CRC)
-    // pairs — needed to pin down the exact span the device's response CRC covers.
-    const uint8_t rd_addrs[] = {0x20, 0x09, 0x0A};
-    size_t rd_idx = 0;
+    char   line[96];
+    size_t len      = 0;
+    bool   overflow = false;
+    char   resp[128];
 
     for (;;) {
-        const uint8_t  rd_addr  = rd_addrs[rd_idx];
-        rd_idx = (rd_idx + 1) % (sizeof(rd_addrs) / sizeof(rd_addrs[0]));
-        const uint8_t  rd_crc   = crc3_read_request(rd_addr);
-        const uint64_t rd_frame = ((uint64_t)1       << 9) |
-                                   ((uint64_t)rd_addr << 3) |
-                                   ((uint64_t)rd_crc);
-
-        Serial.printf("[PROG] READ 0x%02X  frame=0x%03llX  CRC=%d\n", rd_addr, rd_frame, rd_crc);
-        // arm_rx=true: RMT is armed inside TX just before PROG is released,
-        // so capture starts before the device has a chance to respond.
-        manchester_tx_send(rd_frame, 12, /*start_mark=*/false, /*end_mark=*/false, /*arm_rx=*/true);
-
-        // Response frame (plan §2.6): SYNC[2] | DATA[32] | CRC[3] = 37 bits.
-        // Hardware shows the leading sync bit(s) may merge into the device's
-        // start mark, so accept 35–37 bits; DATA and CRC anchor to the LSB end.
-        uint64_t response = 0;
-        const uint8_t rx_bits = manchester_rx_receive(&response, 200);
-
-        if (rx_bits >= 35 && rx_bits <= 37) {
-            const uint32_t rx_data = (uint32_t)((response >> 3) & 0xFFFFFFFFUL);
-            const uint8_t  rx_crc  = (uint8_t)(response & 0x7);
-            // Response CRC covers DATA[32] only — hardware-verified 2026-07-03
-            // against live captures (including changing TEMP_OUT data in 0x20).
-            const bool crc_ok = (crc3_response(rx_data) == rx_crc);
-            Serial.printf("[RX]  ADDR=0x%02X DATA=0x%08X CRC=%d %s\n",
-                          rd_addr, rx_data, rx_crc, crc_ok ? "OK" : "** CRC FAIL **");
-        } else {
-            // Distinguish a true timeout (no edges captured) from a decode failure,
-            // and dump the raw pulse train for post-mortem (H/L + width in µs).
-            uint32_t raw[96];
-            const size_t rc = manchester_rx_last_raw(raw, 96);
-            if (rc == 0) {
-                Serial.println("[RX]  timeout — RMT captured no edges");
-            } else {
-                Serial.printf("[RX]  decode error: got %d bits (expected 35-37), raw items=%u\n",
-                              rx_bits, (unsigned)rc);
-                Serial.print("[RX]  pulses:");
-                for (size_t i = 0; i < rc; ++i) {
-                    const uint32_t d0 = raw[i] & 0x7FFFu;
-                    const uint32_t l0 = (raw[i] >> 15) & 1u;
-                    const uint32_t d1 = (raw[i] >> 16) & 0x7FFFu;
-                    const uint32_t l1 = (raw[i] >> 31) & 1u;
-                    if (d0) Serial.printf(" %c%lu", l0 ? 'H' : 'L', d0 / 10u);  // ticks→µs
-                    if (d1) Serial.printf(" %c%lu", l1 ? 'H' : 'L', d1 / 10u);
+        while (Serial.available() > 0) {
+            const char c = (char)Serial.read();
+            if (c == '\n' || c == '\r') {
+                if (overflow) {
+                    Serial.println("ERR ARG");
+                } else if (len > 0) {
+                    line[len] = '\0';
+                    cmd_parser_process(line, resp, sizeof(resp));
+                    Serial.println(resp);
                 }
-                Serial.println();
+                len = 0;
+                overflow = false;
+            } else if (len < sizeof(line) - 1) {
+                line[len++] = c;
+            } else {
+                overflow = true;   // line too long — answer ERR ARG at terminator
             }
         }
-
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 

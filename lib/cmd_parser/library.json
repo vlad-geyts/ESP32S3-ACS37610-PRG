@@ -1,0 +1,8 @@
+{
+    "name": "cmd_parser",
+    "version": "1.0.0",
+    "description": "ASCII host-protocol command parser (natively testable, handlers injected)",
+    "dependencies": [
+        { "name": "acs37610_frames" }
+    ]
+}

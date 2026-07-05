@@ -1156,3 +1156,13 @@ Excellent — G4 signed off. G5 brings the four register tabs alive: parameteriz
 
 
     **Suggested hardware check** (mirrors plan §11.3): Connect → Power On → ENABLE DEVICE → Read All and browse the tabs → change SENS_FINE on EE_CUST0 and **Write Shadow** (volatile, harmless) → verify green + shadow column updates → **Write EEPROM** on EE_CUST2's C_SPARE (your designated safe register) → verify. After that, G6 wires up your Save to File / Load from File buttons.
+
+
+    `BY ME: I'd consider G5 is completed. No issues during hardware check.  I'll be switching PCs. Will move to my office PC. Please update coresponding files for PC switching. We'll continue with G6 phase.`
+
+    All set for the switch:
+      - **Project memory** — G5 marked complete and hardware-validated (2026-07-05), and the "NEXT UP" section now contains the full G6 work order for the office-PC session: `storage.py` with the §9 JSON format, Save to File (Read All → abort on any failure → JSON), Load from File with your v1.1 semantics (WEEP 0x09/0x0A + read-back verify + Load indicator, WRITE_LOCK guard on the loaded value), and the worker ops to add. G7 (validation/polish + the deferred USB-CDC qualification) is noted as what follows.
+      - **MEMORY.md index** — refreshed to "G1–G5 done & hardware-validated, next up: G6".
+      - **Git** — working tree is clean, everything's committed, so just push from here and pull at the office. One machine note for when you arrive: the office PC won't have the `host/.venv` (it's not in git) — recreate it there with `py -m venv host\.venv` then `pip install -r host\requirements.txt`, exactly as the requirements header describes.
+
+Transfer `.claude` as usual, and on the office PC just say "continue with G6" — the memory has everything needed to start on storage.py and the Save/Load wiring. See you there!      

@@ -1166,3 +1166,10 @@ Excellent — G4 signed off. G5 brings the four register tabs alive: parameteriz
       - **Git** — working tree is clean, everything's committed, so just push from here and pull at the office. One machine note for when you arrive: the office PC won't have the `host/.venv` (it's not in git) — recreate it there with `py -m venv host\.venv` then `pip install -r host\requirements.txt`, exactly as the requirements header describes.
 
 Transfer `.claude` as usual, and on the office PC just say "continue with G6" — the memory has everything needed to start on storage.py and the Save/Load wiring. See you there!      
+
+
+## To run the GUI
+```bat
+cd host
+.venv\Scripts\python.exe -m acs_gui.app
+```

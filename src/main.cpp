@@ -50,6 +50,9 @@ void setup() {
     manchester_tx_init(33);
     manchester_rx_init(33);
 
+    //manchester_tx_init(100);
+    //manchester_rx_init(100);
+
     // DUT rail stays OFF at boot; the host enables it with PWRON (GUI plan §3).
     acs_init(Config::PwrEn);
 

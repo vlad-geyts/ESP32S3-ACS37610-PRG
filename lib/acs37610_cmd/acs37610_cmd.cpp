@@ -40,7 +40,7 @@ bool acs_port_open()   { return s_port_open; }
 AcsError acs_auth() {
     if (!s_pwr_on) return AcsError::PwrOff;
     const uint64_t frame = acs_build_write_frame(kAccessAddr, kAccessData);
-    manchester_tx_send(frame, 44, /*start_mark=*/true, /*end_mark=*/true);
+    manchester_tx_send(frame, 44, /*start_mark=*/false, /*end_mark=*/false);
     esp_rom_delay_us(kSettleUs);
     s_port_open = true;
     return AcsError::None;

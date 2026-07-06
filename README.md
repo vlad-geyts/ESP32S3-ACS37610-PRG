@@ -1232,3 +1232,16 @@ Both G7 priorities are implemented and verified as far as possible without hardw
   Everything's documented in `host/README.md` — a transports table (which env → which connector → which driver) plus build/distribute instructions. All 48 tests still pass.
 
   **Your two validation steps**: flash `esp32-s3-usb` and run `hw_smoke.py` on the new port, then the GUI over native USB; and try the exe folder on a PC without the dev setup (your other PC is the perfect test). After those pass, what's left of G7 is the formal §11.3 end-to-end checklist and a short operator guide to close out Phase 5.
+
+
+
+  ## To use USB OTC variant
+```
+  pio run -e esp32-s3-usb -t upload
+```
+
+  ## To run the GUI
+```bat
+cd host
+.venv\Scripts\python.exe -m acs_gui.app
+```

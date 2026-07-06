@@ -31,8 +31,8 @@ class MainTab(QWidget):
     sig_power_off = Signal()
     sig_enable_device = Signal()
     sig_read_all = Signal()
-    sig_save = Signal(str)            # path — Save to File (v1.1)
-    sig_load = Signal(int, int, bool)  # data09, data0A, force — Load from File
+    sig_save = Signal(str)             # path — Save to File (v1.1)
+    sig_load = Signal(object, bool)    # {addr: data26} for 0x09/0x0A/0x0B, force
     # parsed snapshot for the register tabs' editors (wired in MainWindow).
     # Signal(object): an int-keyed dict can't marshal through Signal(dict)
     # (QVariantMap requires string keys) — object passes it through as-is.
@@ -96,8 +96,8 @@ class MainTab(QWidget):
             " Any read failure aborts the save.")
         self.load_btn = QPushButton("Load from File")
         self.load_btn.setToolTip(
-            "Write a saved snapshot to EEPROM 0x09 and 0x0A, then read back"
-            " and verify. The Load indicator shows the outcome.")
+            "Write a saved snapshot to EEPROM 0x09, 0x0A and 0x0B, then read"
+            " back and verify. The Load indicator shows the outcome.")
         self.ind_load = StatusIndicator("Load")
         dgrid.addWidget(self.read_all_btn, 0, 0, 1, 2)
         dgrid.addWidget(self.ind_read_all, 0, 2)
@@ -189,10 +189,12 @@ class MainTab(QWidget):
                           " EE_CUST1 (0x0A) values")
             return
 
-        data09 = values[0x09] & DATA26_MASK
-        data0a = values[0x0A] & DATA26_MASK
+        # write targets: all customer EEPROM registers present in the file
+        # (v1.2 — EE_CUST2 included; 0x0B optional in older snapshots)
+        write_values = {addr: values[addr] & DATA26_MASK
+                        for addr in (0x09, 0x0A, 0x0B) if addr in values}
         force = False
-        if (data09 >> 25) & 1:   # WRITE_LOCK guard applies to loaded data too
+        if (write_values[0x09] >> 25) & 1:   # WRITE_LOCK guard on loaded data
             text, ok = QInputDialog.getText(
                 self, "PERMANENT WRITE_LOCK",
                 "The loaded EE_CUST0 value has WRITE_LOCK[25]=1 — writing it\n"
@@ -205,7 +207,7 @@ class MainTab(QWidget):
         self.log_view.appendPlainText(f"[loading snapshot {path}]")
         self.snapshot_loaded.emit(values)   # populate tab editors for review
         self.ind_load.set_state(StatusIndicator.ACTIVE, "Writing…")
-        self.sig_load.emit(data09, data0a, force)
+        self.sig_load.emit(write_values, force)
 
     # ------------------------------------------------- worker feedback
 

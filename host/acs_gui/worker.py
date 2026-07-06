@@ -238,14 +238,20 @@ class ProgrammerWorker(QObject):
         finally:
             self.busy_changed.emit(False)
 
-    @Slot(int, int, bool)
-    def op_load_snapshot(self, data09: int, data0a: int, force: bool) -> None:
-        """Load from File (plan §8.7 v1.1): write the snapshot values to
-        EEPROM 0x09 and 0x0A, then read back and verify each. Aborts the
-        sequence on the first failure."""
+    @Slot(object, bool)
+    def op_load_snapshot(self, values: dict, force: bool) -> None:
+        """Load from File (plan §8.7 v1.2): write the snapshot values to the
+        customer EEPROM registers — 0x09, 0x0A and 0x0B (each only if present
+        in the snapshot) — then read back and verify each. Aborts the
+        sequence on the first failure. `force` applies to 0x09 (WRITE_LOCK)."""
         self.busy_changed.emit(True)
         try:
-            for addr, data, f in ((0x09, data09, force), (0x0A, data0a, False)):
+            written = []
+            for addr, f in ((0x09, force), (0x0A, False), (0x0B, False)):
+                if addr not in values:
+                    self.log.emit(f"[load: 0x{addr:02X} not in snapshot — skipped]")
+                    continue
+                data = values[addr]
                 try:
                     self._client.write_eeprom(addr, data, f)
                     r = self._client.read_register(addr)
@@ -259,11 +265,13 @@ class ProgrammerWorker(QObject):
                         self.load_done.emit(False,
                                             f"0x{addr:02X}: ECC fault")
                         return
+                    written.append(f"0x{addr:02X}")
                 except (ProtocolError, TransportError) as exc:
                     self.op_error.emit(f"Load: WEEP {addr:02X} failed: {exc}")
                     self.load_done.emit(False, f"WEEP {addr:02X}: {exc}")
                     return
-            self.log.emit("[snapshot written to 0x09/0x0A and verified]")
+            self.log.emit(f"[snapshot written to {', '.join(written)}"
+                          f" and verified]")
             self.load_done.emit(True, "written and verified")
         finally:
             self.busy_changed.emit(False)

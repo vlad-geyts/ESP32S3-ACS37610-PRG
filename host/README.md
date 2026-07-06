@@ -33,9 +33,10 @@ grey until it succeeds) → Read All. The activity log shows every protocol line
 
 - **Save to File** reads all six registers and writes a JSON snapshot (any read failure
   aborts — no partial files).
-- **Load from File** validates the snapshot, writes it to EEPROM `0x09`/`0x0A`, reads back
-  and verifies; the Load indicator shows the outcome. Loaded values also populate the tab
-  editors. A snapshot with WRITE_LOCK[25]=1 requires typing `LOCK` to confirm.
+- **Load from File** validates the snapshot, writes it to EEPROM `0x09`/`0x0A`/`0x0B`
+  (each if present in the file), reads back and verifies; the Load indicator shows the
+  outcome. Loaded values also populate the tab editors. A snapshot with WRITE_LOCK[25]=1
+  requires typing `LOCK` to confirm.
 
 ## Tests (no hardware needed)
 

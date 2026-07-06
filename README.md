@@ -1168,6 +1168,39 @@ Excellent — G4 signed off. G5 brings the four register tabs alive: parameteriz
 Transfer `.claude` as usual, and on the office PC just say "continue with G6" — the memory has everything needed to start on storage.py and the Save/Load wiring. See you there!      
 
 
+**G6 is complete — Save to File and Load from File are live on the Main tab**. 46 tests pass (38 prior + 8 new storage tests), and the offscreen GUI checks all pass.
+
+**How it works:**
+
+  - **Save to File** (green, gated behind ENABLE DEVICE): pick a filename → the worker reads all six registers → writes a plan-§9 JSON snapshot with decoded fields, timestamp, and firmware version. Any read failure aborts the whole save — no partial snapshot files. The Read All indicator doubles as save status ("Saving…" → "Saved"), since it's the identical read sequence.
+  - **Load from File**: the snapshot is parsed and **validated before anything touches the device** — wrong format/version, address mismatches, non-hex or oversized values are all rejected with a specific error in the log. Then the values go to the tab editors for you to see, EEPROM 0x09 and 0x0A are written via `WEEP`, each read back and compared, and the Load indicator ends green "Verified" or red with the failure reason. If a loaded snapshot has `WRITE_LOCK[25]=1`, you must type LOCK in a dialog before anything is written — same guard as the tab editor, applied to file data.
+  - The snapshot stores the full 32-bit read words as authoritative `raw` (so FAULT_STATUS/TEMP_OUT and ECC bits are preserved for reference), with decoded `fields` alongside for human diffing.
+
+One implementation note for the record (it's in memory now): PySide6 signals declared as `Signal(dict)` silently fail to marshal int-keyed dicts — Qt maps `dict` to QVariantMap, which requires string keys.  `Signal(object)` is the fix; the offscreen test caught it before it could reach hardware.
+
+**Hardware check when convenient**: Connect → Power On → ENABLE DEVICE → Save to File (open the JSON in an editor — it should show your familiar values: EE_CUST0 0x002095AE, EE_CUST2 0x00123456…) → optionally tweak a value in the file or on a tab → Load from File → Load indicator "Verified" and the tabs refresh with the written values.
+
+That completes G1 through G6 — every plan deliverable except G7 (validation & polish: the §11.3 end-to-end checklist, operator guide, packaging, and the USB-CDC transport qualification we deliberately parked). Ready for that whenever you are.
+
+`BY ME: "Save to File" is fully fucntional. "Load from File" does not load a tweak value into corresponding resister. For example. I've changed EE_CUST2 in .json file from 0 to 1 and save the file. Then I've pressed  " Load  from File" controll button.  Indicator displayed GREEN -  [Load: Verified], but the value on EE_CUST2 was still 0. Additional "Read" form that tab went throug without error with the same value -0.`
+
+Fixed — **Load from File now writes EE_CUST2 (0x0B) along with 0x09 and 0x0A**, each with its own read-back verify.
+
+To recap what happened on your bench: the v1.1 spec (from your original wording) scoped Load to "0x09 and 0x0A memory locations" only. So your edited EE_CUST2 value was parsed, shown in the tab editor — but never sent to the device. The green "Verified" was honest for what it verified (0x09/0x0A, which were unchanged). Your test exposed the scope gap, not a verify malfunction — a good outcome for trusting the indicator.
+
+**The corrected behavior:**
+
+  - Load writes all three customer EEPROM registers present in the snapshot: 0x09, 0x0A, 0x0B — in that order, aborting on the first failure.
+  - 0x09 and 0x0A remain mandatory in the file; **0x0B is optional** (an older or hand-trimmed snapshot without it logs `[load: 0x0B not in snapshot — skipped]` rather than failing).
+  - The WRITE_LOCK typed-`LOCK` confirmation still guards the loaded 0x09 value.
+  - The activity log now names exactly which registers were written: `[snapshot written to 0x09, 0x0A, 0x0B and verified]`.
+
+Verified offscreen with a mocked device: the WEEP sequence is `09 → 0A → 0B` with the tweaked 0x0B value included, the skip path works, and all 46 tests still pass. The GUI plan (§7.1/§8.7, marked "scope corrected v1.2"), README, and memory are updated to match.
+
+Please rerun your exact scenario: edit EE_CUST2 in the JSON → Load from File → the EE_CUST2 tab should now show the new value, and a manual Read should confirm it stuck in EEPROM.
+
+
+
 ## To run the GUI
 ```bat
 cd host

@@ -361,7 +361,7 @@ Five tabs in a `QTabWidget`: **Main**, **EE_CUST0**, **EE_CUST1**, **EE_CUST2**,
 | **Read All** button | Reads every register backing the tabs: `0x09, 0x19, 0x0A, 0x1A, 0x0B, 0x20` (§8.3) |
 | **Read All** status bar | Green = all reads completed; Red = any read failed (no response / CRC / ECC) (Ideas req #2) |
 | **Save to File** button (v1.1) | Runs the full read sequence over `0x09, 0x19, 0x0A, 0x1A, 0x0B, 0x20`, then writes the snapshot to JSON (§9). Any read failure aborts the save |
-| **Load from File** button + status indicator (v1.1) | Loads a JSON snapshot, writes the saved values to EEPROM `0x09` and `0x0A` (`WEEP`), then triggers a read-back command sequence to verify there are no EEPROM write errors. Indicator: green = all writes verified; red = any write/verify error. WRITE_LOCK guard (§7.6) still applies |
+| **Load from File** button + status indicator (v1.1, scope corrected v1.2) | Loads a JSON snapshot, writes the saved values to the customer EEPROM registers `0x09`, `0x0A` **and `0x0B`** (`WEEP`, each only if present in the file), then triggers a read-back command sequence to verify there are no EEPROM write errors. Indicator: green = all writes verified; red = any write/verify error. WRITE_LOCK guard (§7.6) still applies. *(v1.2 hardware-test finding: v1.1's 0x09/0x0A-only scope meant an edited EE_CUST2 value loaded green-verified without being written.)* |
 | **Activity log** panel | Scrolling view of sent commands / responses / errors (engineering aid) |
 
 > "Read All" reads the six registers shown across the four data tabs. The Ideas doc phrase
@@ -449,12 +449,14 @@ entries are clamped/rejected per field bit width. Edits are local until a Write.
 - **Save to File:** run the Read All sequence (§8.3) over `0x09, 0x19, 0x0A, 0x1A, 0x0B, 0x20`;
   on success write the snapshot to JSON (§9). Any read failure aborts the save (partial snapshots
   are not written) and flags the status red.
-- **Load from File:** parse and validate the JSON → write the saved values to EEPROM `0x09`
-  (`WEEP 09`) and `0x0A` (`WEEP 0A`) → run a read-back command sequence and compare against the
-  written values to verify there are no EEPROM write errors → Load status indicator green
-  (all verified) or red (any failure). The WRITE_LOCK guard (§7.6) applies to the loaded `0x09`
-  value; a snapshot with bit[25]=1 requires the same explicit confirmation. Loaded values are also
-  populated into the tab editors so the user sees what was written.
+- **Load from File (scope corrected v1.2):** parse and validate the JSON → write the saved
+  values to the customer EEPROM registers `0x09`, `0x0A` and `0x0B` (`WEEP`; each written only
+  if present in the snapshot — `0x09`/`0x0A` are mandatory, `0x0B` optional) → run a read-back
+  command sequence and compare against the written values to verify there are no EEPROM write
+  errors → Load status indicator green (all verified) or red (any failure). The WRITE_LOCK
+  guard (§7.6) applies to the loaded `0x09` value; a snapshot with bit[25]=1 requires the same
+  explicit confirmation. Loaded values are also populated into the tab editors so the user sees
+  what was written.
 
 ---
 

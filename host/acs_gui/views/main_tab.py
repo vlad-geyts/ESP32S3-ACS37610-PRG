@@ -13,11 +13,12 @@ from __future__ import annotations
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QPlainTextEdit,
-    QPushButton, QVBoxLayout, QWidget,
+    QComboBox, QFileDialog, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog,
+    QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
-from .. import registers
+from .. import registers, storage
+from ..registers import DATA26_MASK
 from ..transport import list_ports
 from ..widgets.status_indicator import StatusIndicator
 
@@ -30,6 +31,12 @@ class MainTab(QWidget):
     sig_power_off = Signal()
     sig_enable_device = Signal()
     sig_read_all = Signal()
+    sig_save = Signal(str)            # path — Save to File (v1.1)
+    sig_load = Signal(int, int, bool)  # data09, data0A, force — Load from File
+    # parsed snapshot for the register tabs' editors (wired in MainWindow).
+    # Signal(object): an int-keyed dict can't marshal through Signal(dict)
+    # (QVariantMap requires string keys) — object passes it through as-is.
+    snapshot_loaded = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -84,10 +91,14 @@ class MainTab(QWidget):
         self.read_all_btn = QPushButton("Read All")
         self.ind_read_all = StatusIndicator("Read All")
         self.save_btn = QPushButton("Save to File")
+        self.save_btn.setToolTip(
+            "Read all six registers and save the snapshot to a JSON file."
+            " Any read failure aborts the save.")
         self.load_btn = QPushButton("Load from File")
+        self.load_btn.setToolTip(
+            "Write a saved snapshot to EEPROM 0x09 and 0x0A, then read back"
+            " and verify. The Load indicator shows the outcome.")
         self.ind_load = StatusIndicator("Load")
-        for b in (self.save_btn, self.load_btn):
-            b.setToolTip("Implemented in phase G6")
         dgrid.addWidget(self.read_all_btn, 0, 0, 1, 2)
         dgrid.addWidget(self.ind_read_all, 0, 2)
         dgrid.addWidget(self.save_btn, 1, 0)
@@ -119,6 +130,8 @@ class MainTab(QWidget):
         self.pwr_off_btn.clicked.connect(self.sig_power_off)
         self.enable_btn.clicked.connect(self._on_enable_clicked)
         self.read_all_btn.clicked.connect(self._on_read_all_clicked)
+        self.save_btn.clicked.connect(self._on_save_clicked)
+        self.load_btn.clicked.connect(self._on_load_clicked)
 
     # ------------------------------------------------------------- actions
 
@@ -148,6 +161,51 @@ class MainTab(QWidget):
     def _on_read_all_clicked(self) -> None:
         self.ind_read_all.set_state(StatusIndicator.ACTIVE, "Reading…")
         self.sig_read_all.emit()
+
+    def _on_save_clicked(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save register snapshot", "acs37610_snapshot.json",
+            "JSON snapshot (*.json)")
+        if not path:
+            return
+        # Save runs the same read sequence as Read All — reuse its indicator.
+        self.ind_read_all.set_state(StatusIndicator.ACTIVE, "Saving…")
+        self.sig_save.emit(path)
+
+    def _on_load_clicked(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load register snapshot", "", "JSON snapshot (*.json)")
+        if not path:
+            return
+        try:
+            values = storage.load_snapshot(path)
+        except storage.StorageError as exc:
+            self.ind_load.set_state(StatusIndicator.FAIL)
+            self.on_error(f"Load: {exc}")
+            return
+        if 0x09 not in values or 0x0A not in values:
+            self.ind_load.set_state(StatusIndicator.FAIL)
+            self.on_error("Load: snapshot lacks EE_CUST0 (0x09) or"
+                          " EE_CUST1 (0x0A) values")
+            return
+
+        data09 = values[0x09] & DATA26_MASK
+        data0a = values[0x0A] & DATA26_MASK
+        force = False
+        if (data09 >> 25) & 1:   # WRITE_LOCK guard applies to loaded data too
+            text, ok = QInputDialog.getText(
+                self, "PERMANENT WRITE_LOCK",
+                "The loaded EE_CUST0 value has WRITE_LOCK[25]=1 — writing it\n"
+                "PERMANENTLY locks the device EEPROM.\n\nType LOCK to proceed:")
+            if not ok or text.strip() != "LOCK":
+                self.ind_load.set_state(StatusIndicator.IDLE, "Cancelled")
+                return
+            force = True
+
+        self.log_view.appendPlainText(f"[loading snapshot {path}]")
+        self.snapshot_loaded.emit(values)   # populate tab editors for review
+        self.ind_load.set_state(StatusIndicator.ACTIVE, "Writing…")
+        self.sig_load.emit(data09, data0a, force)
 
     # ------------------------------------------------- worker feedback
 
@@ -216,6 +274,22 @@ class MainTab(QWidget):
         else:
             self.ind_read_all.set_state(StatusIndicator.FAIL)
 
+    @Slot(bool, str)
+    def on_save_done(self, ok: bool, detail: str) -> None:
+        if ok:
+            self.ind_read_all.set_state(StatusIndicator.OK, "Saved")
+        else:
+            self.ind_read_all.set_state(StatusIndicator.FAIL)
+            self.on_error(f"Save: {detail}")
+
+    @Slot(bool, str)
+    def on_load_done(self, ok: bool, detail: str) -> None:
+        if ok:
+            self.ind_load.set_state(StatusIndicator.OK, "Verified")
+        else:
+            self.ind_load.set_state(StatusIndicator.FAIL)
+            self.on_error(f"Load: {detail}")
+
     # --------------------------------------------------------- gating
 
     def _update_controls(self) -> None:
@@ -234,6 +308,5 @@ class MainTab(QWidget):
         # v1.1 gating: data controls dead until ENABLE DEVICE succeeds
         gated_ok = self._device_enabled and not busy
         self.read_all_btn.setEnabled(gated_ok)
-        # Save/Load stay disabled until G6 regardless of gating
-        self.save_btn.setEnabled(False)
-        self.load_btn.setEnabled(False)
+        self.save_btn.setEnabled(gated_ok)
+        self.load_btn.setEnabled(gated_ok)

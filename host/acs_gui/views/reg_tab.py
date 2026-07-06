@@ -185,6 +185,13 @@ class RegTab(QWidget):
         self._enabled = enabled
         self._update_controls()
 
+    @Slot(object)
+    def on_snapshot_loaded(self, values: dict) -> None:
+        """Populate the Edit column from a loaded file snapshot (plan §8.7)."""
+        if self._reg.addr in values:
+            self.table.set_edits_from_raw(values[self._reg.addr] & DATA26_MASK)
+            self._sync_raw_from_fields()
+
     def _update_controls(self) -> None:
         allow = self._enabled and not self._busy
         self.read_btn.setEnabled(allow)

@@ -47,6 +47,8 @@ class MainWindow(QMainWindow):
         self.main_tab.sig_power_off.connect(w.op_power_off)
         self.main_tab.sig_enable_device.connect(w.op_enable_device)
         self.main_tab.sig_read_all.connect(w.op_read_all)
+        self.main_tab.sig_save.connect(w.op_save_to_file)
+        self.main_tab.sig_load.connect(w.op_load_snapshot)
         for tab in self.reg_tabs:
             tab.sig_read.connect(w.op_read_register)
             tab.sig_write_eeprom.connect(w.op_write_eeprom_verified)
@@ -62,6 +64,8 @@ class MainWindow(QMainWindow):
         w.device_enabled_changed.connect(self.main_tab.on_device_enabled)
         w.read_result.connect(self.main_tab.on_read_result)
         w.read_all_done.connect(self.main_tab.on_read_all_done)
+        w.save_done.connect(self.main_tab.on_save_done)
+        w.load_done.connect(self.main_tab.on_load_done)
         for tab in (*self.reg_tabs, self.fault_tab):
             w.read_result.connect(tab.on_read_result)
             w.reg_read_done.connect(tab.on_reg_read_done)
@@ -69,6 +73,8 @@ class MainWindow(QMainWindow):
             w.device_enabled_changed.connect(tab.on_device_enabled)
         for tab in self.reg_tabs:
             w.write_done.connect(tab.on_write_done)
+            # loaded snapshot values -> tab editors for review (plan §8.7)
+            self.main_tab.snapshot_loaded.connect(tab.on_snapshot_loaded)
 
     def closeEvent(self, event) -> None:
         # Queued before quit(), so the worker powers the DUT off and closes

@@ -18,7 +18,8 @@ py -m venv .venv
 | `acs_gui/registers.py` | G3 | Register/field model + encode/decode codec (plan §6) |
 | `acs_gui/worker.py`    | G4 | Qt worker thread owning all serial I/O; UI talks via signals |
 | `acs_gui/mainwindow.py` + `views/main_tab.py` | G4 | MAIN tab: connect, Power On/Off, ENABLE DEVICE gating, Read All, activity log |
-| Register tabs, Save/Load | G5/G6 | Placeholders present, not yet implemented |
+| `views/reg_tab.py` + `views/fault_tab.py` + `widgets/field_table.py` | G5 | Register tabs: field editors, raw-hex sync, Read / Write with read-back verify, WRITE_LOCK guard |
+| `acs_gui/storage.py` | G6 | JSON snapshot format (plan §9); MAIN-tab Save to File / Load from File |
 
 ## Run the GUI
 
@@ -29,6 +30,12 @@ cd host
 
 Workflow: select COM port → Connect → Power On → **ENABLE DEVICE** (data controls stay
 grey until it succeeds) → Read All. The activity log shows every protocol line.
+
+- **Save to File** reads all six registers and writes a JSON snapshot (any read failure
+  aborts — no partial files).
+- **Load from File** validates the snapshot, writes it to EEPROM `0x09`/`0x0A`, reads back
+  and verifies; the Load indicator shows the outcome. Loaded values also populate the tab
+  editors. A snapshot with WRITE_LOCK[25]=1 requires typing `LOCK` to confirm.
 
 ## Tests (no hardware needed)
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from . import registers
+from . import registers, storage
 from .protocol import ProtocolClient, ProtocolError
 from .transport import SerialTransport, TransportError
 
@@ -46,6 +46,8 @@ class ProgrammerWorker(QObject):
     read_all_done = Signal(bool)         # overall Read All outcome
     reg_read_done = Signal(int, bool)    # per-tab Read outcome (eeprom addr)
     write_done = Signal(int, bool, str)  # addr written, verified?, detail
+    save_done = Signal(bool, str)        # Save to File outcome, path / detail
+    load_done = Signal(bool, str)        # Load from File outcome, detail
     op_error = Signal(str)               # operation failure (also logged)
 
     def __init__(self):
@@ -53,6 +55,7 @@ class ProgrammerWorker(QObject):
         self._transport = SerialTransport()
         self._client = ProtocolClient(
             _LoggingTransport(self._transport, self.log.emit))
+        self._idn = ""   # remembered for snapshot metadata
 
     # -- operations (invoked via queued connections from the UI thread) ----
 
@@ -62,6 +65,7 @@ class ProgrammerWorker(QObject):
         try:
             self._transport.open(port)
             idn = self._client.idn()
+            self._idn = idn
             self.log.emit(f"[connected to {port}: {idn}]")
             self.conn_changed.emit(True, idn)
         except (TransportError, ProtocolError) as exc:
@@ -204,5 +208,62 @@ class ProgrammerWorker(QObject):
                     self.op_error.emit(f"READ {addr:02X}: link error: {exc}")
                     break   # link is gone; no point continuing the sequence
             self.read_all_done.emit(ok)
+        finally:
+            self.busy_changed.emit(False)
+
+    @Slot(str)
+    def op_save_to_file(self, path: str) -> None:
+        """Save to File (plan §8.7 v1.1): read ALL_ADDRS, then write the JSON
+        snapshot. Any read failure aborts — no partial snapshots."""
+        self.busy_changed.emit(True)
+        try:
+            values: dict[int, int] = {}
+            for addr in registers.ALL_ADDRS:
+                try:
+                    r = self._client.read_register(addr)
+                    values[addr] = r.data
+                    self.read_result.emit(addr, r.data, r.ecc)
+                except (ProtocolError, TransportError) as exc:
+                    self.op_error.emit(f"READ {addr:02X} failed: {exc}")
+                    self.save_done.emit(False,
+                                        f"aborted — READ {addr:02X} failed")
+                    return
+            try:
+                storage.save_snapshot(path, values, fw_version=self._idn)
+            except (storage.StorageError, OSError) as exc:
+                self.save_done.emit(False, f"file write failed: {exc}")
+                return
+            self.log.emit(f"[snapshot saved to {path}]")
+            self.save_done.emit(True, path)
+        finally:
+            self.busy_changed.emit(False)
+
+    @Slot(int, int, bool)
+    def op_load_snapshot(self, data09: int, data0a: int, force: bool) -> None:
+        """Load from File (plan §8.7 v1.1): write the snapshot values to
+        EEPROM 0x09 and 0x0A, then read back and verify each. Aborts the
+        sequence on the first failure."""
+        self.busy_changed.emit(True)
+        try:
+            for addr, data, f in ((0x09, data09, force), (0x0A, data0a, False)):
+                try:
+                    self._client.write_eeprom(addr, data, f)
+                    r = self._client.read_register(addr)
+                    self.read_result.emit(addr, r.data, r.ecc)
+                    if r.data26 != data:
+                        self.load_done.emit(
+                            False, f"0x{addr:02X}: read-back 0x{r.data26:07X}"
+                                   f" != written 0x{data:07X}")
+                        return
+                    if r.ecc == "FAIL":
+                        self.load_done.emit(False,
+                                            f"0x{addr:02X}: ECC fault")
+                        return
+                except (ProtocolError, TransportError) as exc:
+                    self.op_error.emit(f"Load: WEEP {addr:02X} failed: {exc}")
+                    self.load_done.emit(False, f"WEEP {addr:02X}: {exc}")
+                    return
+            self.log.emit("[snapshot written to 0x09/0x0A and verified]")
+            self.load_done.emit(True, "written and verified")
         finally:
             self.busy_changed.emit(False)

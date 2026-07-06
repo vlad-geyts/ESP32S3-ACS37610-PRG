@@ -1200,6 +1200,20 @@ Verified offscreen with a mocked device: the WEEP sequence is `09 → 0A → 0B`
 Please rerun your exact scenario: edit EE_CUST2 in the JSON → Load from File → the EE_CUST2 tab should now show the new value, and a manual Read should confirm it stuck in EEPROM.
 
 
+**Yes — expected by design, but the silent part was a flaw, and it's now fixed**. Per plan §9, `raw` is authoritative and `fields` is just a human-readable decode written at save time (for reviewing and diffing snapshots). Loading never re-encodes `fields` — which you correctly deduced from the behavior.
+
+The problem was that a `fields` edit disagreeing with `raw` was silently ignored — directly contradicting §9's own rule that "mismatches are reported, not silently ignored." Your hand-edit was exactly such a mismatch. So now `parse_snapshot` re-decodes `raw` and cross-checks every `fields` entry; if you repeat your experiment (C_SPARE: 0 → 1, raw untouched), Load will refuse with:
+
+`Load: EE_CUST2.fields.C_SPARE=1 disagrees with raw=0x00000000 (which decodes to 0)`.
+`'raw' is authoritative — edit 'raw', or keep 'fields' consistent with it`.
+
+
+..in the activity log, with the Load indicator red — nothing touches the device. Deleting the whole informational `fields` block is also fine (it's optional), so the two valid ways to hand-edit a snapshot are: change `raw`, or drop fields and change raw. This is now documented in the plan (§9, v1.2 note) and the host README, with two new tests covering exactly your scenario — 48 passing.
+
+And thanks for confirming the earlier fix along the way: your raw-edit test proves Load now writes 0x0B with verify and refreshes the tab. That closes G6's hardware validation. G7 (validation & polish + the parked USB-CDC qualification) is next whenever you're ready.
+
+
+
 
 ## To run the GUI
 ```bat

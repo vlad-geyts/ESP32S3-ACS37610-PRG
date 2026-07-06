@@ -1233,15 +1233,63 @@ Both G7 priorities are implemented and verified as far as possible without hardw
 
   **Your two validation steps**: flash `esp32-s3-usb` and run `hw_smoke.py` on the new port, then the GUI over native USB; and try the exe folder on a PC without the dev setup (your other PC is the perfect test). After those pass, what's left of G7 is the formal §11.3 end-to-end checklist and a short operator guide to close out Phase 5.
 
+Recorded — office bench is a real 3-phase motor control board with ACS37610 sensors on Phase U and Phase W, home bench is the single-sensor eval board.
+
+That context surfaces one practical workflow point worth thinking about before you build a library of snapshot files: with two sensors on one board (and each carrying its own factory trim, plus whatever calibration you write), a saved JSON is per sensor, not per board — whichever PROG pin the programmer was clipped to. Two snapshots from the same board can legitimately differ, and a Phase-U file loaded into the Phase-W sensor would silently overwrite W's calibration with U's — the write would verify green, because verification checks the write stuck, not that it went to the intended sensor.
+
+The snapshot format already has the answer built in: the §9 JSON's `device_id field` ("optional user/serial label"), which the GUI currently leaves empty. A small G7-polish enhancement would be: **Save to File pops a one-line label prompt** ("Motor board #3, Phase U") stored as `device_id`, and **Load from File shows that label in a confirm dialog** before writing — so you always see what you're about to program into the connected sensor. Cheap to add, and it turns the file naming discipline into something the tool enforces.
+
+Want me to add that? Otherwise the discipline is manual — encode the phase in the filename (`board3_phaseU.json`), which works fine too. Either way, no firmware or protocol change is needed — one PROG connection, one sensor, exactly as designed.
+
+`BY ME: Yes  please. Those are very usefull addions.`
+
+Both additions coming up — label prompt on Save, label confirmation on Load. Starting with the storage layer, which needs to hand back the metadata on load:
 
 
-  ## To use USB OTC variant
+Both additions are in — 49 tests passing, offscreen checks green:
+
+Save to File now asks for a device label after you pick the filename:
+
+  *Label this snapshot (which board / which sensor)? e.g. Motor board #3, Phase U*
+
+The label is stored in the snapshot's `device_id` field (the §9 slot that was waiting for exactly this), remembered between saves so consecutive saves on the same bench just need an Enter or a one-word tweak ("Phase U" → "Phase W"). Empty is allowed; Cancel aborts the save. The activity log shows it too: `[snapshot [Motor board #3, Phase U] saved to ...]`.
+
+**Load from File** now stops for confirmation before anything is written, showing exactly what you're about to program:
+
+  Write this snapshot to the connected sensor?
+  **Label**: Motor board #3, Phase U
+  **Saved**: 2026-07-06T14:32:10+00:00
+  **Registers**: 0x09, 0x0A, 0x0B
+  The values are written to whichever sensor's PROG pin is currently connected — verify it matches the label.
+
+
+Cancel is the default button (Enter won't accidentally write), and the WRITE_LOCK typed-`LOCK` gate still follows for locked snapshots. Old snapshots without a label load fine — the dialog just shows "(no label)".
+
+So the U/W mix-up scenario now requires clicking past an explicit warning naming the sensor the file came from. Ready for you to try on the motor board — save one snapshot per phase with labels, then do a deliberate cross-load and watch the dialog catch it (cancel at the prompt, of course, unless you want W to inherit U's trim!).
+
+Memory's updated for the switch. One logistics point that matters for your test: **the built exe does not travel via git** — `host/dist/` is gitignored (build artifacts don't belong in the repo). So you have two ways to get it onto the Home PC:
+
+  1. **Copy the folder directly** — `host\dist\ACS37610-Programmer\` (~120 MB) onto a USB stick or network share. This is the truer portability test: the exe arrives as an opaque folder, exactly as it would on a production PC.
+  2. **Rebuild at home** — `pip install -r requirements.txt` in the home venv now pulls PyInstaller (I pinned it), then run `host\build_exe.bat`. Less pure as a test, but proves the build is reproducible on a second machine.
+
+
+I'd suggest option 1. And when you run it: **don't activate any venv, don't touch Python** — just double-click `ACS37610-Programmer.exe`. That's the point of the exercise. Your home eval board still has the CH343-UART firmware flashed, which is fine — the exe works over the CH343 COM port as-is; reflashing the `esp32-s3-usb` variant there is optional if you also want native USB at home.
+
+Everything else is committed and pushed-ready (only your README edit is pending). Once the exe passes at home, G7's implementation work is done — the last formalities to close Phase 5 are the plan §11.3 end-to-end checklist run and the short operator guide, which I can draft in the next session so you can walk the checklist against it. Good luck with the test!
+
+
+  ## To use USB OTC variant. FLASH F/W explicitly with:
 ```
   pio run -e esp32-s3-usb -t upload
 ```
 
-  ## To run the GUI
+  ## To run the GUI from PS
 ```bat
 cd host
 .venv\Scripts\python.exe -m acs_gui.app
 ```
+
+ ## To run the GUI as Wndows application
+ ```
+ ACS37610-Programmer\ACS37610-Programmer.exe
+ ```

@@ -35,9 +35,16 @@ void programmerTask(void *pvParameters);
 void gpioConfig();
 
 void setup() {
-    // Delay to warm up 
+    // Delay to warm up
     delay(1000);
     Serial.begin(115200);
+#if ARDUINO_USB_CDC_ON_BOOT
+    // Native USB build (env:esp32-s3-usb): Serial is the hardware USB
+    // Serial/JTAG CDC. Zero TX timeout so prints never block when no host
+    // application is reading the port (HWCDC otherwise stalls each write
+    // until its internal timeout once the buffer fills).
+    Serial.setTxTimeoutMs(0);
+#endif
 
     //Terminate unused GPIOs EARLY (before peripheral init)
     ConfigureUnusedGpios();

@@ -10,3 +10,8 @@ host/.venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# PyInstaller build artifacts (host/build_exe.bat)
+host/build/
+host/dist/
+host/*.spec

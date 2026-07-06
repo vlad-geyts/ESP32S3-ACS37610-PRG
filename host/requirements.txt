@@ -8,3 +8,4 @@
 PySide6==6.11.1      # Qt GUI framework (bundles Qt runtime — no separate Qt SDK)
 pyserial==3.5        # serial COM port access to the ESP32 programmer
 pytest==9.1.1        # host-side unit tests (codec round-trips, mock-serial protocol)
+pyinstaller==6.21.0  # build-time only: portable exe packaging (build_exe.bat)

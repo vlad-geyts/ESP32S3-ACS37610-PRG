@@ -28,6 +28,31 @@ cd host
 .venv\Scripts\python.exe -m acs_gui.app
 ```
 
+## Portable build (G7) — run on any PC without Python/VS Code
+
+```bat
+cd host
+build_exe.bat
+```
+
+Produces `dist\ACS37610-Programmer\ACS37610-Programmer.exe` — copy the whole
+folder to any Windows 10/11 x64 machine and run the exe. No install, no
+Python, no drivers beyond the serial port's own (CH343 driver for the UART
+bridge; the native-USB firmware uses Windows' built-in `usbser`).
+
+## Firmware transports (G7)
+
+| PlatformIO env | Serial goes to | COM port on Windows |
+|----------------|----------------|--------------------|
+| `esp32-s3-devkitc-1-n16r8v` (default) | CH343 UART bridge (GPIO43/44) | CH343 driver port |
+| `esp32-s3-usb` | Native USB Serial/JTAG (USB-OTG connector, GPIO19/20) | Built-in `usbser` port |
+
+Flash the native-USB variant with `pio run -e esp32-s3-usb -t upload`, connect
+the **USB-OTG** connector, and qualify with `hw_smoke.py` on the new COM port.
+The protocol is identical — the GUI just selects a different port. Note: the
+native-USB port disappears while the ESP32 reboots (re-enumerates a moment
+later), unlike the CH343 port which stays present.
+
 Workflow: select COM port → Connect → Power On → **ENABLE DEVICE** (data controls stay
 grey until it succeeds) → Read All. The activity log shows every protocol line.
 

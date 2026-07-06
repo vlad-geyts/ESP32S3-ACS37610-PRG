@@ -40,6 +40,11 @@ def main() -> int:
     app.setStyleSheet(_STYLESHEET)
     window = MainWindow()
     window.show()
+    if "--selftest" in sys.argv:
+        # Headless packaging check (used by build_exe.bat): construct the full
+        # UI, then exit 0 instead of entering the event loop.
+        window.close()
+        return 0
     return app.exec()
 
 

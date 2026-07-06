@@ -12,6 +12,7 @@ descriptive message — mismatches are reported, never silently ignored.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Mapping
 
@@ -25,6 +26,21 @@ _RAW32_MASK = 0xFFFFFFFF
 
 class StorageError(Exception):
     """Snapshot file is malformed, wrong version, or inconsistent."""
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """Parsed snapshot: register values + identifying metadata.
+
+    device_id matters on multi-sensor boards (e.g. a 3-phase motor board
+    with an ACS37610 per phase): it tells the operator WHICH sensor a file
+    belongs to before its calibration is written to whatever sensor is
+    currently connected.
+    """
+    values: dict[int, int] = field(default_factory=dict)  # addr -> raw32
+    device_id: str = ""
+    timestamp: str = ""
+    fw_version: str = ""
 
 
 def build_snapshot(values: Mapping[int, int], *, fw_version: str = "",
@@ -135,7 +151,7 @@ def save_snapshot(path: str, values: Mapping[int, int], *,
         f.write("\n")
 
 
-def load_snapshot(path: str) -> dict[int, int]:
+def load_snapshot(path: str) -> Snapshot:
     try:
         with open(path, encoding="utf-8") as f:
             doc = json.load(f)
@@ -143,4 +159,9 @@ def load_snapshot(path: str) -> dict[int, int]:
         raise StorageError(f"cannot read {path}: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise StorageError(f"{path} is not valid JSON: {exc}") from exc
-    return parse_snapshot(doc)
+    return Snapshot(
+        values=parse_snapshot(doc),
+        device_id=str(doc.get("device_id", "") or ""),
+        timestamp=str(doc.get("timestamp", "") or ""),
+        fw_version=str(doc.get("fw_version", "") or ""),
+    )

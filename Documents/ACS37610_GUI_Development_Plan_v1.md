@@ -541,7 +541,7 @@ JSON, human-readable, versioned. Stores raw words and decoded fields plus metada
 |---|------|-------------|
 | O1 | **EE_CUST2 address 0x08 vs 0x0B** | Plan uses **0x0B** (v4.1 §2.7, Approved). Address centralized in `registers.py`. **Confirm against Allegro datasheet** before EEPROM writes to EE_CUST2. |
 | O2 | AUTH / port-open ownership | **Resolved v1.1:** AUTH is an explicit user action (ENABLE DEVICE button, §7.1). `PWRON` never auto-AUTHs; firmware keeps the primitives separate. |
-| O3 | USB-CDC vs UART COM enumeration on Windows | GUI is port-agnostic (selector). When firmware switches to `ARDUINO_USB_CDC_ON_BOOT=1`, re-verify enumeration / driver (v4.1 R6). |
+| O3 | USB-CDC vs UART COM enumeration on Windows | **Resolved (hardware-verified 2026-07-06):** `env:esp32-s3-usb` (hardware USB Serial/JTAG, `ARDUINO_USB_MODE=1` + `ARDUINO_USB_CDC_ON_BOOT=1`) enumerates via Windows' built-in `usbser` driver; full hw_smoke.py sequence passed over the native port. Note: must be flashed with `pio run -e esp32-s3-usb -t upload` — the default env remains the CH343 UART build, and the native connector enumerates a COM port even with UART firmware (ROM USB-Serial/JTAG), which times out on commands. |
 | O4 | **WRITE_LOCK OTP** | Permanent lock if bit[25] committed. Guarded in **both** GUI (§7.6) and firmware (§4.3). Keep disabled by default. |
 | O5 | Serial concurrency | Strictly single in-flight command; UI disables controls during a command. No overlapping PROG frames. |
 | O6 | FAULT_STATUS 32-bit decode | TEMP_OUT extends to bit 27; DATA[27:26] are **not** ECC for this volatile register — codec/`ECC=NA` handle this (§6.1). |

@@ -211,10 +211,11 @@ class ProgrammerWorker(QObject):
         finally:
             self.busy_changed.emit(False)
 
-    @Slot(str)
-    def op_save_to_file(self, path: str) -> None:
+    @Slot(str, str)
+    def op_save_to_file(self, path: str, device_id: str) -> None:
         """Save to File (plan §8.7 v1.1): read ALL_ADDRS, then write the JSON
-        snapshot. Any read failure aborts — no partial snapshots."""
+        snapshot. Any read failure aborts — no partial snapshots. device_id
+        labels which sensor the snapshot belongs to (multi-sensor boards)."""
         self.busy_changed.emit(True)
         try:
             values: dict[int, int] = {}
@@ -229,11 +230,13 @@ class ProgrammerWorker(QObject):
                                         f"aborted — READ {addr:02X} failed")
                     return
             try:
-                storage.save_snapshot(path, values, fw_version=self._idn)
+                storage.save_snapshot(path, values, fw_version=self._idn,
+                                      device_id=device_id)
             except (storage.StorageError, OSError) as exc:
                 self.save_done.emit(False, f"file write failed: {exc}")
                 return
-            self.log.emit(f"[snapshot saved to {path}]")
+            label = f" [{device_id}]" if device_id else ""
+            self.log.emit(f"[snapshot{label} saved to {path}]")
             self.save_done.emit(True, path)
         finally:
             self.busy_changed.emit(False)

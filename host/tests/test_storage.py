@@ -35,11 +35,29 @@ def test_round_trip():
 
 def test_file_round_trip(tmp_path):
     p = tmp_path / "snap.json"
-    storage.save_snapshot(str(p), HW_VALUES, fw_version="1.0.0")
-    assert storage.load_snapshot(str(p)) == HW_VALUES
+    storage.save_snapshot(str(p), HW_VALUES, fw_version="1.0.0",
+                          device_id="Motor board #3, Phase U")
+    snap = storage.load_snapshot(str(p))
+    assert snap.values == HW_VALUES
+    assert snap.device_id == "Motor board #3, Phase U"
+    assert snap.fw_version == "1.0.0"
+    assert snap.timestamp   # populated at save time
     # file is valid, human-readable JSON
     doc = json.loads(p.read_text(encoding="utf-8"))
     assert doc["fw_version"] == "1.0.0"
+    assert doc["device_id"] == "Motor board #3, Phase U"
+
+
+def test_load_missing_metadata_defaults_empty(tmp_path):
+    # hand-trimmed snapshot without metadata keys still loads
+    doc = storage.build_snapshot(HW_VALUES)
+    for key in ("device_id", "timestamp", "fw_version"):
+        del doc[key]
+    p = tmp_path / "bare.json"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    snap = storage.load_snapshot(str(p))
+    assert snap.values == HW_VALUES
+    assert snap.device_id == "" and snap.timestamp == ""
 
 
 def test_partial_snapshot_allowed():

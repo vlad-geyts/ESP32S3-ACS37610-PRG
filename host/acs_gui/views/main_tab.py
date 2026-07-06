@@ -14,7 +14,7 @@ from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog,
-    QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
+    QMessageBox, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
 from .. import registers, storage
@@ -31,7 +31,7 @@ class MainTab(QWidget):
     sig_power_off = Signal()
     sig_enable_device = Signal()
     sig_read_all = Signal()
-    sig_save = Signal(str)             # path — Save to File (v1.1)
+    sig_save = Signal(str, str)        # path, device label — Save to File
     sig_load = Signal(object, bool)    # {addr: data26} for 0x09/0x0A/0x0B, force
     # parsed snapshot for the register tabs' editors (wired in MainWindow).
     # Signal(object): an int-keyed dict can't marshal through Signal(dict)
@@ -44,6 +44,7 @@ class MainTab(QWidget):
         self._powered = False
         self._device_enabled = False
         self._busy = False
+        self._last_device_id = ""   # remembered between saves for convenience
         self._build_ui()
         self.refresh_ports()
         self._update_controls()
@@ -168,9 +169,19 @@ class MainTab(QWidget):
             "JSON snapshot (*.json)")
         if not path:
             return
+        # Label WHICH sensor this snapshot belongs to — essential on
+        # multi-sensor boards (e.g. motor board with Phase U + Phase W).
+        label, ok = QInputDialog.getText(
+            self, "Device label",
+            "Label this snapshot (which board / which sensor)?\n"
+            "e.g.  Motor board #3, Phase U\n"
+            "Leave empty for no label:", text=self._last_device_id)
+        if not ok:
+            return   # Cancel aborts the save
+        self._last_device_id = label.strip()
         # Save runs the same read sequence as Read All — reuse its indicator.
         self.ind_read_all.set_state(StatusIndicator.ACTIVE, "Saving…")
-        self.sig_save.emit(path)
+        self.sig_save.emit(path, self._last_device_id)
 
     def _on_load_clicked(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -178,11 +189,12 @@ class MainTab(QWidget):
         if not path:
             return
         try:
-            values = storage.load_snapshot(path)
+            snap = storage.load_snapshot(path)
         except storage.StorageError as exc:
             self.ind_load.set_state(StatusIndicator.FAIL)
             self.on_error(f"Load: {exc}")
             return
+        values = snap.values
         if 0x09 not in values or 0x0A not in values:
             self.ind_load.set_state(StatusIndicator.FAIL)
             self.on_error("Load: snapshot lacks EE_CUST0 (0x09) or"
@@ -193,6 +205,24 @@ class MainTab(QWidget):
         # (v1.2 — EE_CUST2 included; 0x0B optional in older snapshots)
         write_values = {addr: values[addr] & DATA26_MASK
                         for addr in (0x09, 0x0A, 0x0B) if addr in values}
+
+        # Confirm against the snapshot's label BEFORE writing: on a
+        # multi-sensor board the programmer writes whichever sensor's PROG
+        # pin is connected — make the operator check it is the right one.
+        targets = ", ".join(f"0x{a:02X}" for a in sorted(write_values))
+        answer = QMessageBox.question(
+            self, "Confirm Load",
+            "Write this snapshot to the connected sensor?\n\n"
+            f"Label:\t{snap.device_id or '(no label)'}\n"
+            f"Saved:\t{snap.timestamp or '(unknown)'}\n"
+            f"Registers:\t{targets}\n\n"
+            "The values are written to whichever sensor's PROG pin is"
+            " currently connected — verify it matches the label.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel)
+        if answer != QMessageBox.StandardButton.Yes:
+            self.ind_load.set_state(StatusIndicator.IDLE, "Cancelled")
+            return
         force = False
         if (write_values[0x09] >> 25) & 1:   # WRITE_LOCK guard on loaded data
             text, ok = QInputDialog.getText(
@@ -204,7 +234,8 @@ class MainTab(QWidget):
                 return
             force = True
 
-        self.log_view.appendPlainText(f"[loading snapshot {path}]")
+        label = f" [{snap.device_id}]" if snap.device_id else ""
+        self.log_view.appendPlainText(f"[loading snapshot{label} {path}]")
         self.snapshot_loaded.emit(values)   # populate tab editors for review
         self.ind_load.set_state(StatusIndicator.ACTIVE, "Writing…")
         self.sig_load.emit(write_values, force)

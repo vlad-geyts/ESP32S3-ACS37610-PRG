@@ -1,0 +1,69 @@
+{
+  "format": "acs37610-registers",
+  "version": 1,
+  "device_id": "Phase U",
+  "timestamp": "2026-07-06T19:45:55+00:00",
+  "fw_version": "",
+  "registers": {
+    "EE_CUST0": {
+      "addr": "0x09",
+      "raw": "0x00001234",
+      "fields": {
+        "WRITE_LOCK": 0,
+        "COM_LOCK": 0,
+        "SPARE": 0,
+        "OTF_DIS": 0,
+        "POL": 0,
+        "CLAMP_EN": 0,
+        "FAULT_DIS": 0,
+        "FAULTR_DIS": 0,
+        "QVO": 9,
+        "SENS_FINE": 52
+      },
+      "shadow_addr": "0x19",
+      "shadow_raw": "0x00001234"
+    },
+    "EE_CUST1": {
+      "addr": "0x0A",
+      "raw": "0x00001234",
+      "fields": {
+        "OCF_HYST": 0,
+        "FAULT_LATCH": 0,
+        "OCF_P_DIS": 0,
+        "OCF_N_DIS": 0,
+        "OCF_QUAL": 0,
+        "OTF_THRESH": 0,
+        "OCF_N_THRES": 36,
+        "OCF_P_THRES": 52
+      },
+      "shadow_addr": "0x1A",
+      "shadow_raw": "0x00001234"
+    },
+    "EE_CUST2": {
+      "addr": "0x0B",
+      "raw": "0x00001234",
+      "fields": {
+        "C_SPARE": 4660
+      }
+    },
+    "FAULT_STATUS": {
+      "addr": "0x20",
+      "raw": "0x00001234",
+      "fields": {
+        "TEMP_OUT": 0,
+        "SPARE_HI": 0,
+        "UV_STAT": 1,
+        "OV_STAT": 0,
+        "OC_STAT": 0,
+        "OT_STAT": 1,
+        "FP_STAT": 0,
+        "SPARE_LO": 1,
+        "UV_EV": 1,
+        "OV_EV": 0,
+        "OC_EV": 1,
+        "OT_EV": 0,
+        "FP_EV": 0
+      }
+    }
+  }
+}

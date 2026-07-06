@@ -1213,10 +1213,22 @@ The problem was that a `fields` edit disagreeing with `raw` was silently ignored
 And thanks for confirming the earlier fix along the way: your raw-edit test proves Load now writes 0x0B with verify and refreshes the tab. That closes G6's hardware validation. G7 (validation & polish + the parked USB-CDC qualification) is next whenever you're ready.
 
 
-
-
 ## To run the GUI
 ```bat
 cd host
 .venv\Scripts\python.exe -m acs_gui.app
 ```
+
+
+`BY ME: Execelt result. Lets start the last G7 pahse. What is impoertant: 1) make native USB for the GUI; 2) Mke GUI portable acroos PCs without VS code.`
+
+Both G7 priorities are implemented and verified as far as possible without hardware:
+
+  1. **Native USB firmware — new** `esp32-s3-usb` **build environment**. It uses the *ESP32-S3's hardware USB Serial/JTAG controller* (not the TinyUSB stack) — the most reliable CDC option: Windows 10/11 enumerates it with the built-in `usbser` driver, so target PCs need **no CH343 driver at all**. The protocol is untouched; the GUI just picks the new COM port. One firmware addition: `Serial.setTxTimeoutMs(0`) in the USB build, so a print can never stall the command loop if no host is reading the port. Both environments build clean, and the default env is still the CH343 one, so nothing changes until you opt in.
+  To qualify it, exactly as we planned back when we parked this: connect the **USB-OTG** connector, `pio run -e esp32-s3-usb -t upload`, find the new COM port, then `hw_smoke.py COMx` → then the GUI. One behavioral difference to expect: this port disappears/re-enumerates when the ESP32 reboots, unlike the CH343 port.
+
+  2. **Portable GUI — one command, zero-install deployment**. `host\build_exe.bat` produces `dist\ACS37610-Programmer\ACS37610-Programmer.exe` (~120 MB folder with Qt bundled). Copy that folder to any Windows 10/11 x64 PC — no Python, no venv, no VS Code — and double-click the exe. I ran the build for real and the packaged exe passes a `--selftest` (constructs the complete GUI headlessly, exit 0). PyInstaller is pinned in `requirements.txt` as a build-time dependency, and build artifacts are gitignored.
+
+  Everything's documented in `host/README.md` — a transports table (which env → which connector → which driver) plus build/distribute instructions. All 48 tests still pass.
+
+  **Your two validation steps**: flash `esp32-s3-usb` and run `hw_smoke.py` on the new port, then the GUI over native USB; and try the exe folder on a PC without the dev setup (your other PC is the perfect test). After those pass, what's left of G7 is the formal §11.3 end-to-end checklist and a short operator guide to close out Phase 5.

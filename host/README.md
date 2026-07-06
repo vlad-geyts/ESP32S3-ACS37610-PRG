@@ -57,7 +57,11 @@ Workflow: select COM port → Connect → Power On → **ENABLE DEVICE** (data c
 grey until it succeeds) → Read All. The activity log shows every protocol line.
 
 - **Save to File** reads all six registers and writes a JSON snapshot (any read failure
-  aborts — no partial files).
+  aborts — no partial files). A prompt asks for a **device label** (e.g. "Motor board #3,
+  Phase U") stored as `device_id` — essential on multi-sensor boards, where each snapshot
+  belongs to one specific sensor.
+- **Load from File** shows that label in a confirmation dialog before writing — verify the
+  connected PROG pin matches the labeled sensor.
 - **Load from File** validates the snapshot, writes it to EEPROM `0x09`/`0x0A`/`0x0B`
   (each if present in the file), reads back and verifies; the Load indicator shows the
   outcome. Loaded values also populate the tab editors. A snapshot with WRITE_LOCK[25]=1

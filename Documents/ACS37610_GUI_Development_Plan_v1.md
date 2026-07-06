@@ -485,6 +485,10 @@ JSON, human-readable, versioned. Stores raw words and decoded fields plus metada
 - `fields` is informational/diff-friendly; `raw` is authoritative on Load.
 - Load validates `format`/`version`, addresses, and word width; mismatches are reported, not
   silently ignored.
+- **Consistency check (added after hardware testing, v1.2):** if a `fields` block is present,
+  Load re-decodes `raw` and compares — a hand-edited field value that disagrees with `raw` is
+  rejected with an error naming the field, instead of being silently ignored. To hand-edit a
+  snapshot, change `raw` (or delete the informational `fields` block).
 
 ---
 

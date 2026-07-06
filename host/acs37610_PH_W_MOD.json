@@ -41,7 +41,7 @@
     },
     "EE_CUST2": {
       "addr": "0x0B",
-      "raw": "0x00000000",
+      "raw": "0x00000001",
       "fields": {
         "C_SPARE": 1
       }

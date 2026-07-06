@@ -92,6 +92,27 @@ def parse_snapshot(doc: dict) -> dict[int, int]:
             raise StorageError(f"{name}: addr 0x{addr:02X} does not match"
                                f" expected 0x{reg.addr:02X}")
         values[reg.addr] = _parse_hex(f"{name}.raw", entry.get("raw"))
+
+        # `raw` is authoritative, but a hand-edited `fields` value that
+        # disagrees with it must fail loudly, not be silently ignored —
+        # otherwise an edited field would load green without taking effect.
+        fields = entry.get("fields")
+        if isinstance(fields, dict):
+            decoded = registers.decode(reg.addr, values[reg.addr])
+            for fname, fval in fields.items():
+                if fname not in decoded:
+                    raise StorageError(f"{name}.fields: unknown field {fname!r}")
+                try:
+                    fval_int = int(fval)
+                except (TypeError, ValueError):
+                    raise StorageError(f"{name}.fields.{fname}:"
+                                       f" {fval!r} is not an integer") from None
+                if fval_int != decoded[fname]:
+                    raise StorageError(
+                        f"{name}.fields.{fname}={fval_int} disagrees with"
+                        f" raw={entry.get('raw')} (which decodes to"
+                        f" {decoded[fname]}). 'raw' is authoritative — edit"
+                        f" 'raw', or keep 'fields' consistent with it.")
         if "shadow_raw" in entry:
             if reg.shadow_addr is None:
                 raise StorageError(f"{name}: has shadow_raw but no shadow register")

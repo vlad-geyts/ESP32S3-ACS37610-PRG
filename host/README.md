@@ -37,6 +37,9 @@ grey until it succeeds) → Read All. The activity log shows every protocol line
   (each if present in the file), reads back and verifies; the Load indicator shows the
   outcome. Loaded values also populate the tab editors. A snapshot with WRITE_LOCK[25]=1
   requires typing `LOCK` to confirm.
+- **Hand-editing snapshots:** `raw` is authoritative; `fields` is an informational decode.
+  Edit `raw` to change a value — a `fields` entry that disagrees with `raw` makes Load fail
+  with an error naming the field (so edits can't be silently ignored).
 
 ## Tests (no hardware needed)
 

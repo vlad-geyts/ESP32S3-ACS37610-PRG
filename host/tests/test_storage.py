@@ -84,6 +84,29 @@ def test_reject_bad_raw_values():
         storage.parse_snapshot(bad)
 
 
+def test_reject_fields_disagreeing_with_raw():
+    # The exact hardware-found trap: user edits a field value but not raw.
+    doc = storage.build_snapshot(HW_VALUES)
+    bad = json.loads(json.dumps(doc))
+    bad["registers"]["EE_CUST2"]["fields"]["C_SPARE"] = 1   # raw still 0x123456
+    with pytest.raises(StorageError, match="authoritative"):
+        storage.parse_snapshot(bad)
+
+    bad = json.loads(json.dumps(doc))
+    bad["registers"]["EE_CUST0"]["fields"]["BOGUS"] = 1
+    with pytest.raises(StorageError, match="unknown field"):
+        storage.parse_snapshot(bad)
+
+
+def test_fields_block_optional():
+    # fields is informational — a snapshot without it loads fine
+    doc = storage.build_snapshot(HW_VALUES)
+    trimmed = json.loads(json.dumps(doc))
+    for entry in trimmed["registers"].values():
+        del entry["fields"]
+    assert storage.parse_snapshot(trimmed) == HW_VALUES
+
+
 def test_load_rejects_garbage_file(tmp_path):
     p = tmp_path / "bad.json"
     p.write_text("{ not json", encoding="utf-8")

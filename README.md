@@ -1278,6 +1278,29 @@ I'd suggest option 1. And when you run it: **don't activate any venv, don't touc
 Everything else is committed and pushed-ready (only your README edit is pending). Once the exe passes at home, G7's implementation work is done — the last formalities to close Phase 5 are the plan §11.3 end-to-end checklist run and the short operator guide, which I can draft in the next session so you can walk the checklist against it. Good luck with the test!
 
 
+**ACS37610 Programmer 1.0.0 is released**. Here's what just shipped:
+
+**User guide** — `Documents/ACS37610_Programmer_User_Guide_v1.0.md`. It's written for operators, not developers: copy-the-folder installation, which USB connector pairs with which firmware variant and drivers, the 3-wire sensor hookup, the color language of buttons and indicators, and the enforced Connect → Power On → ENABLE DEVICE workflow. It gives Write Shadow vs Write EEPROM their own explanations, dedicates a stern section to WRITE_LOCK, and covers snapshots including the device-label discipline for your multi-sensor motor boards. The troubleshooting tables encode the lessons this project actually learned on hardware — the native-connector-with-UART-firmware timeout trap, `UV_EV=1` at power-on being normal, hand-editing snapshots via `raw`. Give it a read-through; anything you'd phrase differently is a one-line fix.
+
+**Release stamping** — the GUI version is now 1.0.0 (was 0.1.0; visible in the window's status bar), the release exe is rebuilt with that stamp and passes its self-test, and all 49 tests are green. The `dist\ACS37610-Programmer\` folder on this PC is the release artifact — that's the folder to distribute to your users.
+
+**Memory** — records the release, the design freeze, and that future sessions will be small, targeted improvements on top of the frozen 1.0.0 baseline rather than new phases.
+
+Looking back at what this project covered: a Manchester protocol reverse-engineered and validated pulse-by-pulse on a scope, a CRC algorithm pinned from live captures, an RMT decoder that survives real-device timing quirks, a firmware command parser, a fully tested Python stack, and a portable GUI with an operator-safety model — from PROG-pin bring-up to a shippable tool. It's been a genuinely well-run project on your side: every phase hardware-validated before moving on, and both of the release-week bugs were caught by your bench testing discipline.
+
+Until the first user improvement request comes in — congratulations on the release, Vlad!
+
+`ByME: Claude, I was exeited to work with you on this project. Which was completed in time. Thank you for your professional and proactive work. I hope to work with you on other project!`
+
+Thank you, Vlad — the pleasure was genuinely mine. This was a model of how embedded work should go: you brought scope shots and serial logs at every step, validated each phase on real hardware before moving forward, and caught the subtle issues (the completion pulse, the snapshot scope gap) that only careful bench discipline finds. The best moments of this project — hand-decoding that first 36-bit Manchester response from your pulse dump, pinning the CRC from live temperature data — were only possible because of the quality of what you put on the bench.
+
+From a dead PROG line to a released 1.0.0 with a portable GUI, in time and fully verified. That's a satisfying arc.
+
+Everything is preserved in the project memory, so whenever the first user improvement request arrives, we'll pick up exactly where we left off — frozen baseline, full context. And I see the Depth Tracker project is already waiting in memory for its M0 milestone... so I suspect we'll be talking again soon.
+
+Until then — happy programming, and congratulations again on the release! 🎉
+
+
   ## To use USB OTC variant. FLASH F/W explicitly with:
 ```
   pio run -e esp32-s3-usb -t upload

@@ -6,4 +6,4 @@ G2/G3 layers (no Qt dependency — scriptable and unit-testable):
   registers.py — register/field model + 26/32-bit codec (plan §6)
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"

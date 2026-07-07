@@ -1278,42 +1278,22 @@ I'd suggest option 1. And when you run it: **don't activate any venv, don't touc
 Everything else is committed and pushed-ready (only your README edit is pending). Once the exe passes at home, G7's implementation work is done — the last formalities to close Phase 5 are the plan §11.3 end-to-end checklist run and the short operator guide, which I can draft in the next session so you can walk the checklist against it. Good luck with the test!
 
 
-`BY ME: ACS37610-Programmer.exe is running as stanalone Windows application on Home PC, but labels for 'Load" and "Save" are not implemented,. I did try to rebuild at home  : 1) pip install -r requirements.txt - went throgh without errs. 2) host\build_exe.bat - failed`
-
-Nothing's actually broken — two separate small things:
-
-1. **The missing labels are expected in that exe**. The folder you copied was built on the Office PC before the label feature existed (I built it right at the start of G7; the Save/Load labels came later that day and the exe was never rebuilt). The exe is a frozen snapshot of the code at build time — it doesn't pick up newer code from the repo. Rebuilding from your current (pulled) sources will include the labels.
-
-2. **The rebuild "failure" is just a PowerShell quirk**, and the error message even hints at it: PowerShell refuses to run scripts from the current directory unless you prefix the path. `cmd.exe` would have run `build_exe.bat` bare, but PowerShell needs:
-
-      `.\build_exe.bat`
-
-That's the entire fix — your `pip install` already put PyInstaller in place, so the build should run (takes a minute or so) and produce a fresh `dist\ACS37610-Programmer\` with the label prompt on Save and the confirmation dialog on Load.
-
-So: `.\build_exe.bat`, then run the new exe from `dist\ `and re-check Save/Load. That also upgrades your test from "exe runs on another PC" to "build is reproducible on another PC" — both worth having before closing G7.
-
-
-
   ## To use USB OTC variant. FLASH F/W explicitly with:
 ```
   pio run -e esp32-s3-usb -t upload
 ```
 
   ## To run the GUI from PS
-```bat
+```
 cd host
 .venv\Scripts\python.exe -m acs_gui.app
 ```
-
- ## To Rebuil GUI using PS
-
+ ## To Rebuild GUI
  ```
 cd host
 pip install -r requirements.txt
 .\build_exe.bat
- ```
- it should ctreate >dist folder under host
-
+```
 
  ## To run the GUI as Wndows application
  ```

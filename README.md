@@ -1289,6 +1289,16 @@ cd host
 .venv\Scripts\python.exe -m acs_gui.app
 ```
 
+ ## To Rebuil GUI using PS
+
+ ```
+cd host
+pip install -r requirements.txt
+.\build_exe.bat
+ ```
+ it should ctreate >dist folder under host
+ 
+
  ## To run the GUI as Wndows application
  ```
  ACS37610-Programmer\ACS37610-Programmer.exe
